@@ -1,0 +1,2084 @@
+#installation
+```{r}
+devtools::install_github("CyrilLagger/scDiffCom")
+devtools::install_github("DKFZ-E220/HNSCatlas")
+library(scDiffCom)
+library(Seurat)
+library(dplyr)
+# source("~/Thesis/CCC/scripts/utils/my.utils.R")
+source("~/Thesis/CCC/scripts/utils/Utils.R")
+DROPBOX_DIR_PATH <- file.path("/local/ofir/OCohenLab/Dropbox")
+
+LOCAL_DROPBOX_DIR_PATH = file.path("~/Dropbox")
+LOCAL_DIRECTORY_WORKING_DIR = file.path(LOCAL_DROPBOX_DIR_PATH, "gigiadir/CellChat/scripts")
+```
+
+# Example - Kurten.2021.Seurat
+```{r}
+library(future)
+plan(sequential)  
+options(future.globals.maxSize = Inf)    # disable the limit
+options(future.globals.onReference = "ignore")
+
+
+Kurten.2021.AXL.Expression <- add_gene_expression_group(Kurten.2021.Seurat, assay="alra", gene="AXL")
+Kurten.2021.Seurat <- Kurten.2021.AXL.Expression$seurat_obj
+
+Valid.Cell.Types.For.scDiffCom <- Kurten.2021.Seurat@meta.data %>% 
+  filter(cell_type != "") %>%  
+  group_by(cell_type) %>% 
+  filter(all(c("HIGH", "LOW") %in% AXL_EXP)) %>% 
+  pull(cell_type) %>% 
+  unique()
+
+Kurten.2021.Seurat.scDiffCom.Base <- subset(
+    Kurten.2021.Seurat, 
+    subset = cell_type %in% Valid.Cell.Types.For.scDiffCom & !is.na(AXL_EXP)
+)
+
+
+options(scDiffCom.no_parallel = TRUE)
+options(future.globals.maxSize = 20 * 1024^3)   # 20 GB
+Kurten.2021.scDiffCom.Object <- run_interaction_analysis(
+  seurat_object = Kurten.2021.Seurat.scDiffCom.Base,
+  seurat_assay="alra",
+  LRI_species = "human",
+  seurat_celltype_id = "cell_type",
+  seurat_condition_id = list(
+    column_name="AXL_EXP",
+    cond1_name="HIGH",
+    cond2_name="LOW"
+  ),
+  iterations = 1000
+)
+
+```
+## View results on Shiny
+```{r}
+if (!require("shiny")) install.packages("shiny")
+if (!require("shinyWidgets")) install.packages("shinyWidgets")
+if (!require("shinythemes")) install.packages("shinythemes")
+if (!require("DT")) install.packages("DT")
+if (!require("kableExtra")) install.packages("kableExtra")
+if (!require("RColorBrewer")) install.packages("RColorBrewer")
+if (!require("igraph")) install.packages("igraph")
+if (!require("visNetwork")) install.packages("visNetwork")
+if (!require("plotly")) install.packages("plotly")
+if (!require("GOSemSim")) BiocManager::install("GoSemSim")
+if (!require("rrvgo")) BiocManager::install("rrvgo")
+if (!require("org.Mm.eg.db")) BiocManager::install("org.Mm.eg.db")
+```
+
+```{r}
+BuildShiny(Kurten.2021.scDiffCom.Object)
+```
+
+```{r}
+CCI_detected <- GetTableCCI(Kurten.2021.scDiffCom.Object, type = "detected", simplified = TRUE)
+if (!require("ggplot2")) install.packages("ggplot2")
+library(ggplot2)
+
+ggplot(
+  CCI_detected,
+  aes(
+     x = LOGFC,
+     y = -log10(BH_P_VALUE_DE + 1E-2),
+     colour = REGULATION
+  )
+) + geom_point(
+) + scale_colour_manual(
+  values = c("UP" = "red", "DOWN" = "blue", "FLAT" = "green", "NSC" = "grey")
+) + xlab(
+  "log(FC)"
+) + ylab(
+  "-log10(Adj. p-value)"
+)
+
+```
+
+```{r}
+PlotORA(
+  object = Kurten.2021.scDiffCom.Object,
+  category = "LRI",
+  regulation = "UP"
+) + theme(
+  legend.position = c(0.85, 0.4),
+  legend.key.size = unit(0.4, "cm")
+)
+```
+
+
+
+
+
+# scDiffCom Pipeline
+
+## Util Functions
+```{r}
+#
+#  my.utils.R
+#    - add_gene_expression_group 
+library(Seurat)
+library(dplyr)
+library(scDiffCom)
+source("~/Thesis/CellChat/scripts/utils/my.utils.R")
+
+
+get_valid_cell_types <- function(seurat_obj) {
+  valid_cell_types <- seurat_obj@meta.data %>%
+    filter(cell_type != "" & AXL_EXP %in% c("HIGH", "LOW")) %>%
+    group_by(cell_type) %>%
+    filter(all(c("HIGH", "LOW") %in% AXL_EXP)) %>%
+    pull(cell_type) %>%
+    unique()
+  
+  message(sprintf("Found %d valid cell types present in both HIGH and LOW groups", 
+                 length(valid_cell_types)))
+  
+  return(valid_cell_types)
+}
+
+get_patient_col <- function(seurat_obj, patient_col_options) {
+  cell_metadata <- seurat_obj@meta.data
+  available_cols <- colnames(cell_metadata)
+
+  patient_col <- NULL
+  for(col in patient_col_options) {
+    if (col %in% available_cols) {
+      patient_col <- col
+      cat(sprintf("  Using patient column: %s\n", patient_col))
+      break
+    }
+  }
+  
+  return(patient_col)
+}
+
+
+```
+
+
+
+## Load Data
+```{r}
+SEURAT_OBJECTS_DIR <- file.path(DROPBOX_DIR_PATH, "hadasra/thesis/test_objects")
+SEURAT_OBJECTS_OUTPUT_DIR <- file.path("~/Thesis/CellChat/outputs/scDiffCom/Seurats")
+
+all_seurat_files <- list.files(SEURAT_OBJECTS_DIR, pattern = "\\.RDS$", full.names = TRUE, ignore.case = TRUE)
+
+process_seurat_files <- function(
+    file_paths,
+    output_dir = "processed_seurat_objects",
+    log_file = "skipped_datasets.txt",
+    gene = "AXL",
+    patient_col_options = c("orig.ident"),
+    quantiles = c(1/3, 2/3),
+    min_samples = 12,
+    min_target_cells = 500
+) {
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  
+  writeLines(c(
+    paste("Processing Log -", Sys.time()),
+    "file_name\treason\tdetails",
+    "---------------------------------------------------"
+  ), con = log_file)
+  
+  log_skip <- function(name, reason, details) {
+    line <- sprintf("%s\t%s\t%s", name, reason, details)
+    write(line, file = log_file, append = TRUE)
+    cat(sprintf("  -> SKIPPING: %s (%s)\n", reason, details))
+  }
+  
+  
+  cat(sprintf("Processing %d files...\n\n", length(file_paths)))
+  cat(sprintf("Logging skipped datasets to: %s\n\n", log_file))
+  
+  for (i in seq_along(file_paths)) {
+    file_path <- file_paths[i]
+    file_name <- basename(file_path)
+    object_name <- gsub("\\.RDS$", "", file_name, ignore.case = TRUE)
+    
+    cat(sprintf("[%d/%d] Processing %s...\n", i, length(file_paths), file_name))
+    
+    tryCatch({
+      seurat_obj <- readRDS(file_path)
+      cat(sprintf("  Loaded: %d cells, %d features\n", ncol(seurat_obj), nrow(seurat_obj)))
+      
+      patient_col <- get_patient_col(seurat_obj = seurat_obj, 
+                                     patient_col_options = patient_col_options)
+      
+      # Validate Sample num
+      n_samples <- length(unique(seurat_obj@meta.data[[patient_col]]))
+      
+      if (n_samples < min_samples) {
+        log_skip(file_name, "Low Sample Count", sprintf("Found %d samples (Min: %d)", n_samples, min_samples))
+        next 
+      }
+      
+      # Validate more than N = 500 Malignant
+      if (!"cell_type" %in% colnames(seurat_obj@meta.data)) {
+        log_skip(file_name, "Missing Column", "'cell_type' column not found in metadata")
+        next
+      }
+
+      cell_identities <- as.character(seurat_obj@meta.data$cell_type)
+      
+      # Regex to match Epithelial, Tumor, Cancer, or Malignant (case insensitive)
+      target_pattern <- "Epithelial|Tumor|Cancer|Malignant"
+      n_target_cells <- sum(grepl(target_pattern, cell_identities, ignore.case = TRUE))
+      
+      if (n_target_cells < min_target_cells) {
+        log_skip(file_name, "Low Target Cells", sprintf("Found %d matching '%s' (Min: %d)", n_target_cells, target_pattern, min_target_cells))
+        next 
+      }
+      
+      result <- add_gene_expression_group(
+        seurat_obj = seurat_obj,
+        gene = gene,
+        patient_col = patient_col,
+        quantiles = quantiles
+      )
+      
+      # Extract results
+      updated_seurat <- result$seurat_obj
+      patient_summary <- result$patient_summary
+      
+      cat(sprintf("  Added %s_EXP grouping: %d patients\n", gene, nrow(patient_summary)))
+      
+      output_file <- file.path(output_dir, paste0(object_name, "_processed.rds"))
+      
+      force(result) 
+      
+      saveRDS(result, file=output_file)
+      cat(sprintf("  ✓ Saved to: %s\n", output_file))
+      
+    }, error = function(e) {
+      cat(sprintf("  ✗ Error: %s\n", e$message))
+    }, finally = {
+      # --- FIX 3: Memory Cleanup ---
+      # Remove large objects from the current environment to help R free memory
+      if (exists("seurat_obj")) rm(seurat_obj)
+      if (exists("result")) rm(result)
+      if (exists("updated_seurat")) rm(updated_seurat)
+      
+      # Force garbage collection to return memory to OS (crucial for heavy Seurat loops)
+      gc(verbose = FALSE)
+      cat("\n") 
+    })
+  }
+  cat("=== PROCESSING COMPLETE ===\n")
+  cat(sprintf("All processed files saved to: %s\n", output_dir))
+}
+```
+
+
+```{r}
+selected_files <- all_seurat_files
+
+process_seurat_files(selected_files, 
+                     gene="AXL",
+                     patient_col_options = c("sampleID", "orig.ident"),
+                     output_dir = SEURAT_OBJECTS_OUTPUT_DIR)
+```
+
+
+
+## Main Pipeline
+```{r}
+Run.scDiffCom.Pipeline.For.Seurat <- function(seurat_obj) {
+  valid_cell_types <- get_valid_cell_types(seurat_obj)
+  
+  seurat_obj_for_scDiffCom <- subset(
+      seurat_obj, 
+      subset = cell_type %in% valid_cell_types & !is.na(AXL_EXP)
+  )
+  scDiffCom_object <- run_interaction_analysis(
+    seurat_object = seurat_obj_for_scDiffCom,
+    LRI_species = scDiffCom.Pipeline.Config$LRI_species,
+    seurat_celltype_id = scDiffCom.Pipeline.Config$celltype_column,
+    seurat_condition_id = list(
+      column_name="AXL_EXP",
+      cond1_name="HIGHׁ",
+      cond2_name="LOW"
+    ),
+    iterations = scDiffCom.Pipeline.Config$iterations
+  )
+  
+  return(scDiffCom_object)
+}
+
+scDiffCom.Pipeline.Runner <- function(
+    file_paths,
+    output_dir = "scDiffCom_results"
+) {
+  # Create output directory if it doesn't exist
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  
+  cat(sprintf("Processing %d files...\n\n", length(file_paths)))
+  
+  for (i in seq_along(file_paths)) {
+    processed_file <- file_paths[i]
+    
+    if (!file.exists(processed_file)) {
+      cat(sprintf("[%d/%d] ✗ File not found: %s\n\n", i, length(file_paths), processed_file))
+      next
+    }
+    
+    file_name <- basename(processed_file)
+    object_name <- gsub("_processed\\.(RDS|rds)$", "", file_name, ignore.case = TRUE)
+
+    cat(sprintf("[%d/%d] Processing %s...\n", i, length(file_paths), object_name))
+    
+    tryCatch({
+      # Load processed file with grouped data
+      cat("  Loading processed file...\n")
+      processed_with_group_result <- readRDS(processed_file)
+      
+      # Extract Seurat object and patient summary from the result
+      seurat_obj <- processed_with_group_result$seurat_obj
+      patient_summary <- processed_with_group_result$patient_summary
+      
+      cat(sprintf("  Loaded: %d cells, %d features, %d patients\n", 
+                  ncol(seurat_obj), nrow(seurat_obj), nrow(patient_summary)))
+      
+      # Check if AXL_EXP column exists
+      if (!"AXL_EXP" %in% colnames(seurat_obj@meta.data)) {
+        cat("  ✗ Warning: AXL_EXP column not found, skipping...\n\n")
+        next
+      }
+      
+      # Count cells with AXL_EXP annotation
+      axl_annotated <- sum(!is.na(seurat_obj@meta.data$AXL_EXP))
+      axl_high <- sum(seurat_obj@meta.data$AXL_EXP == "HIGH", na.rm = TRUE)
+      axl_low <- sum(seurat_obj@meta.data$AXL_EXP == "LOW", na.rm = TRUE)
+      
+      cat(sprintf("  AXL_EXP annotated: %d cells (HIGH: %d, LOW: %d)\n", 
+                  axl_annotated, axl_high, axl_low))
+      
+      if (axl_annotated == 0) {
+        cat("  ✗ Warning: No cells with AXL_EXP annotation, skipping...\n\n")
+        next
+      }
+      
+      # Run scDiffCom pipeline
+      cat("  Running scDiffCom pipeline...\n")
+      scDiffCom_object <- Run.scDiffCom.Pipeline.For.Seurat(seurat_obj)
+      
+      cat("  scDiffCom analysis complete\n")
+      # Save results
+      output_file <- file.path(output_dir, paste0(object_name, "_scDiffCom.RDS"))
+      
+      cat("  Saving results...\n")
+      force(scDiffCom_object)
+      saveRDS(scDiffCom_object, output_file)
+      
+      cat(sprintf("  ✓ Saved to: %s\n\n", output_file))
+      
+    }, error = function(e) {
+      cat(sprintf("  ✗ Error: %s\n\n", e$message))
+    })
+  }
+  
+  cat("=== PIPELINE COMPLETE ===\n")
+  cat(sprintf("All scDiffCom results saved to: %s\n", output_dir))
+  
+}
+```
+
+## Pipeline Config
+```{r}
+scDiffCom.Pipeline.Config <- list (
+  # QC
+  gene = "AXL",
+  assay = "RNA",
+  min_samples = 12,
+  min_epithelial_cells = 500,
+  epithelial_cell_types = c("Epithelial", "Malignant", "Tumor", "Cancer"),
+  
+  # scDiffCom parameters
+  iterations = 10000,
+  LRI_species = "human",
+  celltype_column = "cell_type",
+  
+  # Parallel processing
+  n_workers = 1,
+  
+  # Output
+  output_dir = "~/Thesis/CellChat/outputs/scDiffCom"
+)
+```
+## Pipeline Runner
+```{r}
+
+all_processed_files <- list.files("~/Thesis/CellChat/outputs/scDiffCom/Seurats", full.names = TRUE)
+
+selected_files <- c("/gpfs0/bgu-ofircohen/users/gigiadir/Thesis/CellChat/outputs/scDiffCom/Seurats/Kurten2021_Head_and_Neck_processed.rds")
+
+scDiffCom.Pipeline.Runner(file_paths = selected_files,
+                          output_dir="~/Thesis/CellChat/outputs/scDiffCom/scDiffComs")
+```
+
+## Inspect Shiny
+```{r}
+
+scDiffCom.Output.Path <- "~/Thesis/CellChat/outputs/scDiffCom/scDiffComs"
+
+selected_scDiffCom_obj_path <- file.path(scDiffCom.Output.Path, "Kurten2021_Head_and_Neck_scDiffCom.RDS")
+
+selected_scDiffCom_obj <- readRDS(selected_scDiffCom_obj_path)
+
+BuildShiny(selected_scDiffCom_obj)
+```
+
+
+
+# scDiffCom Pipeline - V2
+
+## Load Data
+```{r}
+V3.Pipeline.Config <- list(
+  #Seurat Parsing Config
+  n.var.genes = 5000,
+  n.cancner.types = 4
+)
+CANCER_DB_DIR_PATH <- file.path(DROPBOX_DIR_PATH, "Cancer")
+
+my.save.RData("Bassez.2021.Seurat", myfolder="~/Thesis/CellChat/outputs/data", is.load.obj = T)
+my.save.RData("Bassez.2021.Seurat", myfolder=file.path(DROPBOX_DIR_PATH, "Cancer_DB/SC.3CA.Tirosh/Breast"), is.load.obj = T)
+
+HNSCC.Atlas <- readRDS(file.path(CANCER_DB_DIR_PATH, "SingleCell_Data_Misc/HNSCC_Atlas.rds"))
+DefaultAssay(HNSCC.Atlas) <- "RNA"
+my.save.RData("HNSCC.Atlas", myfolder="~/Thesis/CCC/outputs/data", is.load.obj = T)
+
+
+Chan.2021.Seurat <- readRDS(file.path(CANCER_DB_DIR_PATH,"SC.3CA.Tirosh/SeuratObjects_10x_cellnames_with_project/Chan2021_Lung.RDS"))
+
+Chan.2021.Seurat <- subset(Chan.2021.Seurat, orig.ident != "PleuralEffusion")
+Chan.2021.Seurat$orig.ident <- droplevels(Chan.2021.Seurat$orig.ident)
+
+my.save.RData("Chan.2021.Seurat", myfolder="~/Thesis/CellChat/outputs/data")
+
+Hadas.Directory <- file.path("~/../hadasra/thesis/new_objects")
+Bassez.Breast.Seurat <- readRDS(file.path(Hadas.Directory, "Bassez2021_Breast.RDS"))
+Chan.Lung.Seurat <- readRDS(file.path(Hadas.Directory, "Chan2021_Lung.RDS"))
+Biermann.Melanoma.Seurat <- readRDS(file.path(Hadas.Directory, "Biermann2022_Skin.RDS"))
+Chen.Prostate.Seurat <- readRDS(file.path(Hadas.Directory, "Chen2021_Prostate.RDS"))
+Sharma.Liver.Seurat <- readRDS(file.path(Hadas.Directory, "Sharma2020_Liver_Biliary.RDS"))
+Young.Kidney.Seurat <- readRDS(file.path(Hadas.Directory, "Young2018_Kidney.RDS"))
+```
+
+## FindVariableFeatures in Malignant
+```{r}
+HNSCC.Atlas.Malignant.Seurat <- subset(HNSCC.Atlas, Cell_Type == "Epithelial")
+HNSCC.Atlas.Malignant.Seurat <- FindVariableFeatures(HNSCC.Atlas.Malignant.Seurat,
+                                                     nfeatures = V3.Pipeline.Config$n.var.genes)
+HNSCC.Atlas.Malignant.Top.5000.Genes <- VariableFeatures(HNSCC.Atlas.Malignant.Seurat)
+
+
+Bassez.Breast.Malignant.Seurat <- subset(Bassez.Breast.Seurat, cell_type == "Malignant")
+Bassez.Breast.Malignant.Seurat <- FindVariableFeatures(Bassez.Breast.Malignant.Seurat,
+                                                     nfeatures = V3.Pipeline.Config$n.var.genes)
+Bassez.Breast.Malignant.Top.5000.Genes <- VariableFeatures(Bassez.Breast.Malignant.Seurat)
+
+
+Chan.Lung.Malignant.Seurat <- subset(Chan.Lung.Seurat, Consensus_Cell_Type == "Epithelial")
+Chan.Lung.Malignant.Seurat <- FindVariableFeatures(Chan.Lung.Malignant.Seurat,
+                                                   nfeatures = V3.Pipeline.Config$n.var.genes)
+Chan.Lung.Malignant.Top.5000.Genes <- VariableFeatures(Chan.Lung.Malignant.Seurat)
+
+Biermann.Melanoma.Malignant.Seurat <- subset(Biermann.Melanoma.Seurat, Consensus_Cell_Type == "Epithelial")
+Biermann.Melanoma.Malignant.Seurat <- FindVariableFeatures(Biermann.Melanoma.Malignant.Seurat,
+                                                           nfeatures = V3.Pipeline.Config$n.var.genes)
+Biermann.Melanoma.Malignant.Top.5000.Genes <- VariableFeatures(Biermann.Melanoma.Malignant.Seurat)
+
+Chen.Prostate.Malignant.Seurat <- subset(Chen.Prostate.Seurat, Consensus_Cell_Type == "Epithelial")
+Chen.Prostate.Malignant.Seurat <- FindVariableFeatures(Chen.Prostate.Malignant.Seurat,
+                                                           nfeatures = V3.Pipeline.Config$n.var.genes)
+Chen.Prostate.Malignant.Top.5000.Genes <- VariableFeatures(Chen.Prostate.Malignant.Seurat)
+
+
+Sharma.Liver.Malignant.Seurat <- subset(Sharma.Liver.Seurat, Consensus_Cell_Type == "Epithelial")
+Sharma.Liver.Malignant.Seurat <- FindVariableFeatures(Sharma.Liver.Malignant.Seurat,
+                                                           nfeatures = V3.Pipeline.Config$n.var.genes)
+Sharma.Liver.Malignant.Top.5000.Genes <- VariableFeatures(Sharma.Liver.Malignant.Seurat)
+
+
+Young.Kidney.Malignant.Seurat <- subset(Young.Kidney.Seurat, Consensus_Cell_Type == "Epithelial")
+Young.Kidney.Malignant.Seurat <- FindVariableFeatures(Young.Kidney.Malignant.Seurat,
+                                                           nfeatures = V3.Pipeline.Config$n.var.genes)
+Young.Kidney.Malignant.Top.5000.Genes <- VariableFeatures(Young.Kidney.Malignant.Seurat)
+
+
+```
+
+
+# Try to get Genes to check
+```{r}
+library(readr)
+
+# Define file paths
+cosmic_path <- file.path(DROPBOX_DIR_PATH, "Cancer_DB/COSMIC/COSMIC.v103/Cosmic_CancerGeneCensus_v103_GRCh37.tsv")
+ncg_path <- file.path(DROPBOX_DIR_PATH, "Cancer_DB/NetworkCancerGenes/NCG5.cancer.genes.tsv")
+oncokb_path <- file.path(DROPBOX_DIR_PATH, "Cancer_DB/oncokb/OncoKB.2.2.2025.cancerGeneList.tsv")
+
+# Read the files
+cosmic_data <- read_tsv(cosmic_path)
+oncokb_data <- read_tsv(oncokb_path)
+ncg_data <- read_tsv(ncg_path)
+
+library(dplyr)
+library(tidyverse)
+
+all_cancer_genes <- c(
+  oncokb_data$`Hugo Symbol`,
+  cosmic_data$GENE_SYMBOL,
+  ncg_data$symbol
+) %>%
+  unique() %>%
+  sort()
+
+ # 1. Combine your 7 lists into one big vector
+all_study_lists <- list(
+  HNSCC.Atlas = HNSCC.Atlas.Malignant.Top.5000.Genes,
+  Bassez.Breast = Bassez.Breast.Malignant.Top.5000.Genes,
+  Chan.Lung = Chan.Lung.Malignant.Top.5000.Genes,
+  Biermann.Melanoma = Biermann.Melanoma.Malignant.Top.5000.Genes,
+  Chen.Prostate = Chen.Prostate.Malignant.Top.5000.Genes,
+  Sharma.Liver = Sharma.Liver.Malignant.Top.5000.Genes,
+  Young.Kidney = Young.Kidney.Malignant.Top.5000.Genes
+)
+
+Top.5000.Malignant.Genes.Per.Cancer <- enframe(all_study_lists, name = "Source", value = "Gene_name") %>%
+  unnest(Gene_name)
+
+
+# 3. Identify genes that appear in at least K = 4 sources
+gene_counts <- table(Top.5000.Malignant.Genes.Per.Cancer$Gene_name)
+frequent_study_genes <- names(gene_counts[gene_counts >= V3.Pipeline.Config$n.cancner.types])
+
+
+
+# 4. Find the intersection with your COSMIC/OncoKB 'all_cancer_genes'
+final_gene_selection <- intersect(all_cancer_genes, frequent_study_genes)
+# I added some genes from final_gene_selection_ILANIT_version (such as AXL, ERBB2 which only appeared on 3 types and not 4).
+
+# 5. Save the result
+saveRDS(final_gene_selection, file.path("~/Thesis/CCC/outputs/data/final_gene_selection.rds"))
+
+# Summary of results
+print(paste("Total frequent genes found (K >= 4):", length(frequent_study_genes)))
+print(paste("Final count after filtering by Cancer DBs:", length(final_gene_selection)))
+
+
+Complexes.Genes <- unique(unlist(GSDB.list.of.lists$CORUM_core_complexes))
+Complexes.Oncogenes.OncoKB.Cosmic.NCG <- intersect(Complexes.Genes, all_cancer_genes)
+Complexes.Oncogenes.OncoKB <- intersect(Complexes.Genes, oncokb_data$`Hugo Symbol`)
+
+saveRDS(Complexes.Oncogenes.OncoKB.Cosmic.NCG, "~/Thesis/CCC/outputs/data/Complexes.Oncogenes.OncoKB.Cosmic.NCG.rds")
+my.save.RData("Complexes.Oncogenes.OncoKB", "~/Thesis/CCC/outputs/data")
+
+```
+
+
+
+
+# After Mass Run - Try to combine results for ILANIT
+## Analysis Globals & Helpers
+```{r}
+source("~/Thesis/CCC/scripts/utils/Utils.R")
+source("~/Thesis/CCC/scripts/utils/my.utils.R")
+
+library(RColorBrewer)
+library(pheatmap)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(scDiffCom)
+library(ggplot2)
+library(ggrepel)
+
+
+BASE_RESULTS_DIR <- "/gpfs0/bgu-ofircohen/users/gigiadir/Thesis/CCC/outputs/scDiffCom/scDiffComs"
+MALIGNANT_CELLTYPE <- "Epithelial"
+USE_COSINE         <- TRUE           # TRUE → cosine distance instead of correlation
+MIN_GENES_PER_CCI  <- 2              # CCIs must appear in ≥ N genes (filters sparse rows)
+OUTPUT_DIR         <- "."            # where to save the heatmap PNGs
+
+LRI_GO <- scDiffCom::LRI_human$LRI_curated_GO
+BP_GO_INFO <- scDiffCom::gene_ontology_level %>% 
+  filter(ASPECT == "biological_process") %>%
+  select(ID, NAME)
+LRI_GO_BP <- LRI_GO %>%
+  inner_join(BP_GO_INFO, by = c("GO_ID" = "ID"))
+
+```
+
+## Analysis Utils
+```{r}
+switch.conditions.columns <- function(scDiffCom_obj) {
+    #ONLY NEEDED ON THOSE OBJECTS WITHOUT _step4 suffix.
+    message("switching conditions HIGH and LOW")
+    cci_table_detected <- data.table::copy(scDiffCom_obj@cci_table_detected)
+    
+    # Multiply LOGFC by -1
+    logfc_cols = c("LOGFC")
+    cci_table_detected[, (logfc_cols) := lapply(.SD, function(x) x * -1), .SDcols = logfc_cols]
+    
+   # 2. Switch REGULATION values (UP <-> DOWN)
+    cci_table_detected[REGULATION == "UP", REGULATION := "DOWN_temp"]
+    cci_table_detected[REGULATION == "DOWN", REGULATION := "UP"]
+    cci_table_detected[REGULATION == "DOWN_temp", REGULATION := "DOWN"]
+    
+    cci_table_detected$SWITCHED_COLUMNS <- TRUE
+    # Write back to the object
+    scDiffCom_obj@cci_table_detected <- cci_table_detected
+    
+    return(scDiffCom_obj)
+}
+
+load.dataset.scDiffComs <- function(dataset_name, results_dir = BASE_RESULTS_DIR) {
+  #ONLY NEEDED ON THOSE OBJECTS WITHOUT _step4 suffix.
+  message(".  Loading scDiffComs results for dataset: ", dataset_name)
+  rds_dir <- file.path(results_dir, dataset_name)
+  rds_files <- list.files(rds_dir, pattern=paste0("_", dataset_name, "_scDiffCom\\.rds$"), full.names = T)
+  
+  scDiffCom_list <- list()
+  
+  for (rds_path in rds_files) {
+    fname <- basename(rds_path)
+    gene <- str_remove(fname, paste0("_", dataset_name, "_scDiffCom\\.rds$"))
+    message("  Loading gene: ", gene)
+    scDiffCom_obj <- readRDS(rds_path)
+    scDiffCom_obj <- switch.conditions.columns(scDiffCom_obj)
+    scDiffCom_list[[gene]] <- scDiffCom_obj
+  }
+  
+  return(scDiffCom_list)
+}
+
+filter.scDiffCom.cci_table_detected.for.malignant <- function(scDiffCom_obj, malignant_celltype = "Epithelial") {
+  filtered_cci_table <- scDiffCom_obj@cci_table_detected %>%
+    filter(
+      (EMITTER_CELLTYPE == malignant_celltype | RECEIVER_CELLTYPE == malignant_celltype),
+      IS_CCI_DE == TRUE,
+      is.finite(LOGFC)
+    )
+  
+  return (filtered_cci_table)
+}
+
+filter.scDiffCom.cci_table_detected.for.celltypes <- function(scDiffCom_obj, emitter_celltype, receiver_celltype) {
+  filtered_cci_table <- scDiffCom_obj@cci_table_detected %>%
+    filter(
+      EMITTER_CELLTYPE == emitter_celltype,
+      RECEIVER_CELLTYPE == receiver_celltype,
+      IS_CCI_DE == TRUE,
+      is.finite(LOGFC)
+    )
+  
+  return (filtered_cci_table)
+}
+```
+
+## Load Data
+```{r}
+DATASET <- "Bassez2021_Breast"
+Bassez2021_Breast.scDiffComs <- load.dataset.scDiffComs("Bassez2021_Breast")
+Chan2021_Lung.scDiffComs <- load.dataset.scDiffComs("Chan2021_Lung")
+HNSCC_Atlas.scDiffComs <- load.dataset.scDiffComs("HNSCC_Atlas")
+
+
+Bassez2021_Breast.scDiffComs.cci_table_detected.filtered.malignant <- lapply(Bassez2021_Breast.scDiffComs, filter.scDiffCom.cci_table_detected.for.malignant)
+HNSCC_Atlas.malignant <- lapply(HNSCC_Atlas.scDiffComs, filter.scDiffCom.cci_table_detected.for.malignant)
+Chan2021_Lung.malignant <- lapply(Chan2021_Lung.scDiffComs, filter.scDiffCom.cci_table_detected.for.malignant)
+```
+
+
+## GENE x GENE heatmap
+```{r}
+Bassez2021_Breast.LOGFC_list <- list()
+
+for(gene in names(Bassez2021_Breast.scDiffComs.cci_table_detected.filtered.malignant)) {
+  LOGFC_table <- Bassez2021_Breast.scDiffComs.cci_table_detected.filtered.malignant[[gene]] %>%
+    select(CCI, LOGFC) %>%
+    group_by(CCI) %>%
+    summarise(LOGFC = mean(LOGFC, na.rm = TRUE), .groups = "drop")
+  
+  Bassez2021_Breast.LOGFC_list[[gene]] <- LOGFC_table
+}
+
+# prepare LOGFC matrix for heatmap
+all_data <- bind_rows(
+  lapply(names(Bassez2021_Breast.LOGFC_list), function(g) {
+    Bassez2021_Breast.LOGFC_list[[g]] %>% mutate(Gene = g)
+  })
+)
+
+mat_long <- all_data %>%
+  pivot_wider(names_from = Gene, values_from = LOGFC)
+
+mat <- as.matrix(mat_long[, -1])
+rownames(mat) <- mat_long$CCI
+  
+message("  Matrix dimensions (CCIs x Genes): ", nrow(mat), " x ", ncol(mat))
+  
+n_non_na <- rowSums(!is.na(mat))
+mat <- mat[n_non_na >= MIN_GENES_PER_CCI, , drop = FALSE]
+message("  After filtering sparse CCIs: ", nrow(mat), " x ", ncol(mat))
+
+sim_mat   <- cosine_sim_na(mat)
+diag(sim_mat) <- NA
+
+library(gplots)
+# heatmap
+sim_label <- "Cosine Similarity"
+sim_file  <- paste0(DATASET, "_cosine_heatmap.png")
+gene_gene_heatmap <- pheatmap(
+    sim_mat,
+    color          =  colorRampPalette(c("red", "white", "blue"))(100),
+    breaks         = seq(-1, 1, length.out = 101),
+    #na_col         = "grey90",
+    main           = paste0(DATASET, " – Gene-Gene ", sim_label),
+    fontsize_row   = 8,
+    fontsize_col   = 8,
+  )
+
+n_genes <- nrow(sim_mat)
+px_per_gene <- 20  # increase if still overlapping
+
+png("gene-gene-heatmap2.png", width = max(4000, n_genes * px_per_gene), 
+                               height = max(4000, n_genes * px_per_gene), res = 300)
+gplots::heatmap.2(
+    sim_mat,
+    dendrogram = "row",
+    trace      = "none",
+    col        = redgreen(100),
+    margins    = c(14, 14),
+    cexRow     = 0.6,
+    cexCol     = 0.6,
+    srtCol     = 45
+)
+dev.off()
+
+png("gene-gene-heatmap3.png", width = 4000, height = 4000, res = 300)
+pheatmap(
+    sim_mat,
+    color        = colorRampPalette(c("red", "white", "blue"))(100),
+    breaks       = seq(-1, 1, length.out = 101),
+    fontsize_row = max(4, 200 / nrow(sim_mat)),  # auto-shrink based on count
+    fontsize_col = max(4, 200 / nrow(sim_mat)),
+    angle_col    = "45",
+    main         = paste0(DATASET, " – Gene-Gene Cosine Similarity")
+)
+dev.off()
+# ── UMAP of genes based on their LRI (CCI) LOGFC profiles ──────────────────
+library(umap)
+library(ggplot2)
+library(ggrepel)
+
+mat_genes <- t(mat)
+mat_genes_imputed <- mat_genes
+mat_genes_imputed[is.na(mat_genes_imputed)] <- 0
+
+# ── Hierarchical clustering on cosine distance (matches your heatmap) ────────
+k_clusters <- 5  # adjust to however many clusters make sense
+
+dist_mat   <- as.dist(1 - sim_mat)   # cosine distance from your sim_mat
+hclust_res <- hclust(dist_mat, method = "complete")
+clusters   <- cutree(hclust_res, k = k_clusters)
+
+# ── UMAP ─────────────────────────────────────────────────────────────────────
+set.seed(42)
+umap_config              <- umap.defaults
+umap_config$n_neighbors  <- min(15, nrow(mat_genes_imputed) - 1)
+umap_config$min_dist     <- 0.1
+umap_config$metric       <- "cosine"
+
+umap_result <- umap(mat_genes_imputed, config = umap_config)
+
+umap_df <- data.frame(
+  Gene    = rownames(mat_genes_imputed),
+  UMAP1   = umap_result$layout[, 1],
+  UMAP2   = umap_result$layout[, 2],
+  n_CCIs  = rowSums(!is.na(mat_genes)),
+  Cluster = factor(clusters[rownames(mat_genes_imputed)])  # match order safely
+)
+
+# ── Plot ──────────────────────────────────────────────────────────────────────
+p_umap <- ggplot(umap_df, aes(x = UMAP1, y = UMAP2, colour = Cluster, label = Gene)) +
+  geom_point(size = 3, alpha = 0.9) +
+  geom_text_repel(
+    size          = 2.8,
+    max.overlaps  = 40,
+    segment.size  = 0.2,
+    segment.alpha = 0.5,
+    show.legend   = FALSE
+  ) +
+  scale_colour_brewer(palette = "Set1", name = "Cluster") +
+  labs(
+    title    = paste0(DATASET, " – Gene UMAP (LRI / CCI LOGFC space)"),
+    subtitle = paste0("Hierarchical clustering (k = ", k_clusters, ", cosine distance)"),
+    x = "UMAP 1", y = "UMAP 2"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"))
+
+ggsave(
+  paste0(DATASET, "_gene_umap.png"),
+  plot   = p_umap,
+  width  = 10,
+  height = 8,
+  dpi    = 300
+)
+
+message("UMAP saved to ", DATASET, "_gene_umap.png")
+
+# ── Print cluster membership so you can inspect them ─────────────────────────
+cluster_df <- umap_df %>% 
+  select(Gene, Cluster, n_CCIs) %>% 
+  arrange(Cluster, Gene)
+print(cluster_df)
+
+cluster_summary <- cluster_df %>%
+  group_by(Cluster) %>%
+  summarise(
+    n_genes = n(),
+    genes   = paste(sort(Gene), collapse = ", ")
+  ) %>%
+  arrange(Cluster)
+
+print(cluster_summary)
+  
+```
+
+
+
+## GO x CCI - Cancer-T-Cell
+```{r}
+# ── 0.  CONFIG ────────────────────────────────────────────────
+LOGFC_AGG   <- "mean"   # "mean" | "sum"
+N_NEIGHBORS <- 30       # KNN for graph + UMAP
+RESOLUTION  <- 1.2     # Leiden resolution parameter
+MIN_DIST    <- 0.1      # UMAP min_dist
+SEED        <- 42
+
+# ── 1.  PACKAGES ──────────────────────────────────────────────
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(uwot)
+library(FNN)
+library(igraph)
+library(ggplot2)
+library(ggrepel)
+
+# ── 2.  REFERENCE TABLES  ─────────────────────────────────────
+message("Loading reference tables ...")
+
+LRI_GO <- scDiffCom::LRI_human$LRI_curated_GO
+
+GO_BP <- scDiffCom::gene_ontology_level %>%
+  filter(ASPECT == "biological_process") %>%
+  select(ID, NAME)
+
+LRI_GO_BP <- LRI_GO %>%
+  inner_join(GO_BP, by = c("GO_ID" = "ID")) %>%
+  rename(GO_NAME = NAME)
+
+# ── 3.  INTERACTION DATA ──────────────────────────────────────
+Bassez2021_Breast.Malignant_Tcell.interactions <- lapply(
+  Bassez2021_Breast.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.celltypes,
+  emitter_celltype = MALIGNANT_CELLTYPE,
+  receiver_celltype = "T-cells"
+)
+
+Bassez2021_Breast.Malignant_Tcell.interactions.all_data <- bind_rows(
+  lapply(names(Bassez2021_Breast.Malignant_Tcell.interactions), function(g) {
+    Bassez2021_Breast.Malignant_Tcell.interactions[[g]] %>% mutate(Gene = g)
+  })
+)
+
+# ── 4.  GENE × GO-BP MATRIX ───────────────────────────────────
+agg_fn <- match.fun(LOGFC_AGG)
+
+filt_go <- Bassez2021_Breast.Malignant_Tcell.interactions.all_data %>%
+  select(EMITTER_CELLTYPE, RECEIVER_CELLTYPE, LRI, LOGFC, Gene) %>%
+  inner_join(LRI_GO_BP, by = "LRI", relationship = "many-to-many")
+
+gene_go_matrix <- filt_go %>%
+  group_by(Gene, GO_NAME) %>%
+  summarise(
+    agg_LOGFC = agg_fn(LOGFC, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from  = GO_NAME,
+    values_from = agg_LOGFC,
+    values_fill = 0
+  )
+
+gene_go_mat <- gene_go_matrix %>%
+  column_to_rownames("Gene") %>%
+  as.matrix()
+
+# ── 5.  PRE-PROCESSING ────────────────────────────────────────
+nz_cols <- apply(gene_go_mat, 2, var) > 0
+message(sprintf("Keeping %d / %d GO-BP terms (non-zero variance)",
+                sum(nz_cols), ncol(gene_go_mat)))
+
+mat_scaled <- scale(gene_go_mat[, nz_cols])
+mat_scaled[!is.finite(mat_scaled)] <- 0
+
+# ── 6.  KNN GRAPH ─────────────────────────────────────────────
+set.seed(SEED)
+k   <- min(N_NEIGHBORS, nrow(mat_scaled) - 1)
+knn <- FNN::get.knn(mat_scaled, k = k)
+
+n     <- nrow(mat_scaled)
+edges <- do.call(rbind, lapply(seq_len(n), function(i) {
+  cbind(i, knn$nn.index[i, ])
+}))
+g <- igraph::graph_from_edgelist(edges, directed = FALSE) %>%
+  igraph::simplify()
+
+# ── 7.  LEIDEN CLUSTERING ─────────────────────────────────────
+leiden_comm <- igraph::cluster_leiden(
+  g,
+  objective_function   = "modularity",
+  resolution_parameter = RESOLUTION
+)
+clusters <- factor(leiden_comm$membership)
+message(sprintf("Leiden found %d clusters", nlevels(clusters)))
+
+# ── 8.  UMAP ──────────────────────────────────────────────────
+set.seed(SEED)
+umap_coords <- uwot::umap(
+  mat_scaled,
+  n_neighbors = k,
+  min_dist    = MIN_DIST,
+  metric      = "cosine"
+)
+
+umap_df <- data.frame(
+  UMAP1  = umap_coords[, 1],
+  UMAP2  = umap_coords[, 2],
+  Leiden = clusters,
+  Gene   = rownames(mat_scaled)
+)
+
+# ── 9.  PLOT ──────────────────────────────────────────────────
+p <- ggplot(umap_df, aes(x = UMAP1, y = UMAP2,
+                          colour = Leiden, label = Gene)) +
+  geom_point(size = 3, alpha = 0.85) +
+  ggrepel::geom_text_repel(
+    size         = 2.8,
+    max.overlaps = 20,
+    show.legend  = FALSE
+  ) +
+  scale_colour_brewer(palette = "Set2") +
+  theme_classic(base_size = 13) +
+  labs(
+    title    = "Gene UMAP — Malignant → T-cell interactions",
+    subtitle = sprintf("Leiden clustering (resolution = %.1f, k = %d)",
+                       RESOLUTION, k),
+    colour   = "Leiden\nCluster",
+    x        = "UMAP 1",
+    y        = "UMAP 2"
+  )
+
+print(p)
+```
+
+
+
+## GO x CCI
+```{r}
+# ══════════════════════════════════════════════════════════════════════════════
+#  GENE REPRESENTATION IN EMITTER–RECEIVER–GO-BP SPACE
+#  Bassez 2021 Breast Cancer · Malignant cell interactions
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 0.  CONFIG ────────────────────────────────────────────────────────────────
+LOGFC_AGG      <- "mean"       # "mean" | "sum"  — how to collapse LRIs per context
+TOP_VAR_PCT    <- 0.05         # keep top X% GO-contexts by cross-gene variance (0.01 = 1%)
+N_NEIGHBORS    <- 30           # k for KNN graph and UMAP
+RESOLUTION     <- 1.2       # Leiden resolution
+MIN_DIST       <- 0.1          # UMAP min_dist
+SEED           <- 42
+MALIGNANT_TYPE <- "Epithelial"
+
+# ── 1.  PACKAGES ──────────────────────────────────────────────────────────────
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(uwot)
+library(FNN)
+library(igraph)
+library(ggplot2)
+library(ggrepel)
+library(pheatmap)
+
+# ── 2.  REFERENCE TABLES ──────────────────────────────────────────────────────
+message("Loading reference tables ...")
+
+LRI_GO    <- scDiffCom::LRI_human$LRI_curated_GO
+GO_BP     <- scDiffCom::gene_ontology_level %>%
+               filter(ASPECT == "biological_process") %>%
+               select(ID, NAME)
+LRI_GO_BP <- LRI_GO %>%
+               inner_join(GO_BP, by = c("GO_ID" = "ID")) %>%
+               rename(GO_NAME = NAME)
+
+# ── 3.  INTERACTION DATA ──────────────────────────────────────────────────────
+message("Extracting malignant interactions ...")
+
+interactions_per_gene <- lapply(
+  Bassez2021_Breast.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.malignant,
+  malignant_celltype = MALIGNANT_TYPE
+)
+
+interactions_all <- bind_rows(
+  lapply(names(interactions_per_gene), function(g) {
+    interactions_per_gene[[g]] %>% mutate(Gene = g)
+  })
+)
+
+# ── 4.  BUILD EMITTER–RECEIVER–GO-BP CONTEXTS ─────────────────────────────────
+# Key: GO_CONTEXT = GO_NAME__EMITTER__RECEIVER  (parsed later for display)
+message("Joining with GO-BP annotations ...")
+
+agg_fn <- match.fun(LOGFC_AGG)
+
+GO_CCI <- interactions_all %>%
+  select(EMITTER_CELLTYPE, RECEIVER_CELLTYPE, LRI, LOGFC, Gene) %>%
+  inner_join(LRI_GO_BP, by = "LRI", relationship = "many-to-many") %>%
+  mutate(
+    GO_CONTEXT = paste(GO_NAME, EMITTER_CELLTYPE, RECEIVER_CELLTYPE, sep = "__")
+  )
+
+# ── 5.  FILTER: TOP % HIGHLY VARIABLE GO-BP TERMS (on GO_CCI) ────────────────
+message("Selecting top variable GO-BP terms ...")
+
+# Step 1: aggregate per Gene × GO_NAME (collapsing all contexts/LRIs)
+#         to get a pure GO-BP level signal per gene
+gene_gobp_var <- GO_CCI %>%
+  group_by(Gene, GO_NAME) %>%
+  summarise(agg_LOGFC = agg_fn(LOGFC, na.rm = TRUE), .groups = "drop") %>%
+  group_by(GO_NAME) %>%
+  summarise(gobp_var = var(agg_LOGFC, na.rm = TRUE), .groups = "drop")
+
+# Step 2: rank GO-BP terms by cross-gene variance, keep top %
+var_cutoff    <- quantile(gene_gobp_var$gobp_var, probs = 1 - TOP_VAR_PCT, na.rm = TRUE)
+top_gobp      <- gene_gobp_var %>%
+  filter(gobp_var >= var_cutoff) %>%
+  pull(GO_NAME)
+
+message(sprintf(
+  "Keeping %d / %d GO-BP terms (top %.0f%% by cross-gene variance)",
+  length(top_gobp), nrow(gene_gobp_var), TOP_VAR_PCT * 100
+))
+
+# Step 3: filter GO_CCI to only rows whose GO_NAME is in the top set
+GO_CCI_filt <- GO_CCI %>%
+  filter(GO_NAME %in% top_gobp)
+
+message(sprintf(
+  "Retaining %d / %d GO-contexts belonging to those GO-BP terms",
+  n_distinct(GO_CCI_filt$GO_CONTEXT), n_distinct(GO_CCI$GO_CONTEXT)
+))
+
+# ── 6.  GENE × GO-CONTEXT MATRIX (filtered) ───────────────────────────────────
+message("Building gene × GO-context matrix ...")
+
+gene_context_full <- GO_CCI_filt %>%
+  group_by(Gene, GO_CONTEXT) %>%
+  summarise(agg_LOGFC = agg_fn(LOGFC, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = GO_CONTEXT, values_from = agg_LOGFC, values_fill = 0)
+
+gene_context_mat <- gene_context_full %>%
+  column_to_rownames("Gene") %>%
+  as.matrix()
+
+# ── 7.  SCALE ─────────────────────────────────────────────────────────────────
+mat_scaled <- scale(gene_context_mat)
+mat_scaled[!is.finite(mat_scaled)] <- 0   # guard against zero-variance remnants
+
+# ── 8.  KNN GRAPH ─────────────────────────────────────────────────────────────
+set.seed(SEED)
+k   <- min(N_NEIGHBORS, nrow(mat_scaled) - 1)
+knn <- FNN::get.knn(mat_scaled, k = k)
+
+n     <- nrow(mat_scaled)
+edges <- do.call(rbind, lapply(seq_len(n), function(i) cbind(i, knn$nn.index[i, ])))
+
+g <- igraph::graph_from_edgelist(edges, directed = FALSE) %>%
+     igraph::simplify()
+
+# ── 9.  LEIDEN CLUSTERING ─────────────────────────────────────────────────────
+leiden_comm <- igraph::cluster_leiden(
+  g,
+  objective_function   = "modularity",
+  resolution_parameter = RESOLUTION
+)
+clusters <- factor(leiden_comm$membership)
+message(sprintf("Leiden found %d clusters", nlevels(clusters)))
+
+# ── 10.  UMAP ─────────────────────────────────────────────────────────────────
+set.seed(SEED)
+umap_coords <- uwot::umap(
+  mat_scaled,
+  n_neighbors = k,
+  min_dist    = MIN_DIST,
+  metric      = "cosine"
+)
+
+umap_df <- data.frame(
+  UMAP1  = umap_coords[, 1],
+  UMAP2  = umap_coords[, 2],
+  Leiden = clusters,
+  Gene   = rownames(mat_scaled)
+)
+
+# ── 11.  UMAP PLOT ────────────────────────────────────────────────────────────
+p_umap <- ggplot(umap_df, aes(x = UMAP1, y = UMAP2, colour = Leiden, label = Gene)) +
+  geom_point(size = 3, alpha = 0.85) +
+  ggrepel::geom_text_repel(size = 2.8, max.overlaps = 20, show.legend = FALSE) +
+  scale_colour_brewer(palette = "Set2") +
+  theme_classic(base_size = 13) +
+  labs(
+    title    = sprintf("Gene UMAP — %s interactions", MALIGNANT_TYPE),
+    subtitle = sprintf(
+      "Emitter–Receiver–GO-BP space | top %.0f%% variable contexts | Leiden k=%d, res=%.1f",
+      TOP_VAR_PCT * 100, k, RESOLUTION
+    ),
+    colour = "Leiden\nCluster",
+    x = "UMAP 1", y = "UMAP 2"
+  )
+print(p_umap)
+ggsave(
+  filename = "gene-context-umap.png",
+  plot     = p_umap,
+  width    = 12,
+  height   = 8,
+  dpi      = 300
+)
+
+# ── 12.  HEATMAP ──────────────────────────────────────────────────────────────
+library(gplots)
+library(RColorBrewer)
+
+# ── Parse GO_CONTEXT column names ─────────────────────────────────────────────
+parse_context <- function(context_names) {
+  parts <- strsplit(context_names, "__")
+  data.frame(
+    GO_NAME  = sapply(parts, `[`, 1),
+    EMITTER  = sapply(parts, `[`, 2),
+    RECEIVER = sapply(parts, `[`, 3),
+    stringsAsFactors = FALSE
+  )
+}
+
+col_meta <- parse_context(colnames(mat_scaled))
+
+# ── Column labels: GO_NAME only, suppress repeated names ──────────────────────
+n_col_labels <- 90
+step         <- max(1, floor(ncol(mat_scaled) / n_col_labels))
+
+col_labels <- rep("", ncol(mat_scaled))
+# Among the thinned indices, show GO_NAME only on first occurrence
+show_idx   <- seq(1, ncol(mat_scaled), by = step)
+seen       <- c()
+for (i in show_idx) {
+  nm <- col_meta$GO_NAME[i]
+  if (!nm %in% seen) {
+    col_labels[i] <- nm
+    seen <- c(seen, nm)
+  }
+}
+# ── Single ColSideColors: Emitter→Receiver pair ────────────────────────────────
+col_meta$ER_PAIR <- paste(col_meta$EMITTER, "→", col_meta$RECEIVER)
+
+all_pairs <- unique(col_meta$ER_PAIR)
+pair_pal  <- setNames(
+  colorRampPalette(RColorBrewer::brewer.pal(8, "Dark2"))(length(all_pairs)),
+  all_pairs
+)
+col_side_colors <- pair_pal[col_meta$ER_PAIR]   # single character vector ✓
+
+# ── Row side bar: Leiden cluster ───────────────────────────────────────────────
+n_clusters  <- nlevels(clusters)
+cluster_pal <- setNames(
+  RColorBrewer::brewer.pal(max(3, n_clusters), "Set2")[seq_len(n_clusters)],
+  levels(clusters)
+)
+row_colors <- cluster_pal[as.character(clusters[rownames(mat_scaled)])]
+
+# ── Colour scale ───────────────────────────────────────────────────────────────
+heatmap_colors <- colorRampPalette(c("#2166ac", "white", "#d6604d"))(100)
+
+# ── Draw ───────────────────────────────────────────────────────────────────────
+png("gene-context-heatmap.png", width = 6000, height = 4000, res = 300)
+par(oma = c(1, 1, 2, 1))
+
+gplots::heatmap.2(
+  mat_scaled,
+
+  # ── labels ──────────────────────────────────────────────────
+  labCol        = col_labels,
+  labRow        = rownames(mat_scaled),
+  cexCol        = 0.5,
+  cexRow        = 0.65,
+  srtCol        = 45,
+  adjCol        = c(1, 0.5),
+
+  # ── side bars ───────────────────────────────────────────────
+  ColSideColors = col_side_colors,      # Emitter→Receiver pair colour bar
+  RowSideColors = row_colors,           # Leiden cluster colour bar
+
+  # ── clustering ──────────────────────────────────────────────
+  dendrogram    = "both",
+  distfun       = function(x) as.dist(1 - cor(t(x))),
+  hclustfun     = function(d) hclust(d, method = "ward.D2"),
+
+  # ── colour scale ────────────────────────────────────────────
+  col           = heatmap_colors,
+  symbreaks     = TRUE,
+  breaks        = seq(-3, 3, length.out = 101),
+
+  # ── chrome ──────────────────────────────────────────────────
+  trace         = "none",
+  density.info  = "none",
+  margins       = c(16, 8),
+  main          = sprintf(
+    "Gene × Emitter–Receiver–GO-BP  |  top %.0f%% variable contexts",
+    TOP_VAR_PCT * 100
+  ),
+  key.title     = "Scaled\nLOGFC",
+  key.xlab      = "z-score"
+)
+
+# ── Legends ───────────────────────────────────────────────────────────────────
+legend("topright",
+  legend = all_pairs,
+  fill   = pair_pal[all_pairs], border = NA,
+  bty = "n", cex = 0.55, title = "Emitter → Receiver"
+)
+
+dev.off()
+message("Heatmap written to gene-context-heatmap.png")
+
+```
+
+
+## GENES x LRI
+```{r}
+Bassez2021_Breast.LRI_LOGFC_list <- list()
+
+for(gene in names(Bassez2021_Breast.scDiffComs.cci_table_detected.filtered.malignant)) {
+  LOGFC_table <- Bassez2021_Breast.scDiffComs.cci_table_detected.filtered.malignant[[gene]] %>%
+    select(LRI, LOGFC) %>%
+    group_by(LRI) %>%
+    summarise(LOGFC = mean(LOGFC, na.rm = TRUE), .groups = "drop")
+  
+  Bassez2021_Breast.LRI_LOGFC_list[[gene]] <- LOGFC_table
+}
+
+# prepare LOGFC matrix for heatmap
+Bassez_LRI_LOGFC_all_data <- bind_rows(
+  lapply(names(Bassez2021_Breast.LRI_LOGFC_list), function(g) {
+    Bassez2021_Breast.LRI_LOGFC_list[[g]] %>% mutate(Gene = g)
+  })
+)
+
+mat_long <- Bassez_LRI_LOGFC_all_data %>%
+  pivot_wider(names_from = Gene, values_from = LOGFC)
+
+mat <- as.matrix(mat_long[, -1])
+rownames(mat) <- mat_long$CCI
+  
+message("  Matrix dimensions (CCIs x Genes): ", nrow(mat), " x ", ncol(mat))
+  
+n_non_na <- rowSums(!is.na(mat))
+mat <- mat[n_non_na >= MIN_GENES_PER_CCI, , drop = FALSE]
+message("  After filtering sparse CCIs: ", nrow(mat), " x ", ncol(mat))
+
+sim_mat   <- cosine_sim_na(mat)
+diag(sim_mat) <- NA
+
+library(gplots)
+# heatmap
+sim_label <- "Cosine Similarity"
+sim_file  <- paste0(DATASET, "_cosine_heatmap.png")
+gene_gene_heatmap <- pheatmap(
+    sim_mat,
+    color          =  colorRampPalette(c("red", "white", "blue"))(100),
+    breaks         = seq(-1, 1, length.out = 101),
+    #na_col         = "grey90",
+    main           = paste0(DATASET, " – Gene-Gene ", sim_label),
+    fontsize_row   = 8,
+    fontsize_col   = 8,
+  )
+
+n_genes <- nrow(sim_mat)
+px_per_gene <- 20  # increase if still overlapping
+
+png("gene-gene-lri-heatmap2.png", width = max(4000, n_genes * px_per_gene), 
+                               height = max(4000, n_genes * px_per_gene), res = 300)
+gplots::heatmap.2(
+    sim_mat,
+    dendrogram = "row",
+    trace      = "none",
+    col        = redgreen(100),
+    margins    = c(14, 14),
+    cexRow     = 0.6,
+    cexCol     = 0.6,
+    srtCol     = 45
+)
+dev.off()
+
+png("gene-gene-lri-heatmap3.png", width = 4000, height = 4000, res = 300)
+pheatmap(
+    sim_mat,
+    color        = colorRampPalette(c("red", "white", "blue"))(100),
+    breaks       = seq(-1, 1, length.out = 101),
+    fontsize_row = max(4, 200 / nrow(sim_mat)),  # auto-shrink based on count
+    fontsize_col = max(4, 200 / nrow(sim_mat)),
+    angle_col    = "45",
+    main         = paste0(DATASET, " – Gene-Gene Cosine Similarity")
+)
+dev.off()
+# ── UMAP of genes based on their LRI (CCI) LOGFC profiles ──────────────────
+library(umap)
+library(ggplot2)
+library(ggrepel)
+
+mat_genes <- t(mat)
+mat_genes_imputed <- mat_genes
+mat_genes_imputed[is.na(mat_genes_imputed)] <- 0
+
+# ── Hierarchical clustering on cosine distance (matches your heatmap) ────────
+k_clusters <- 5  # adjust to however many clusters make sense
+
+dist_mat   <- as.dist(1 - sim_mat)   # cosine distance from your sim_mat
+hclust_res <- hclust(dist_mat, method = "complete")
+clusters   <- cutree(hclust_res, k = k_clusters)
+
+# ── UMAP ─────────────────────────────────────────────────────────────────────
+set.seed(42)
+umap_config              <- umap.defaults
+umap_config$n_neighbors  <- min(15, nrow(mat_genes_imputed) - 1)
+umap_config$min_dist     <- 0.1
+umap_config$metric       <- "cosine"
+
+umap_result <- umap(mat_genes_imputed, config = umap_config)
+
+umap_df <- data.frame(
+  Gene    = rownames(mat_genes_imputed),
+  UMAP1   = umap_result$layout[, 1],
+  UMAP2   = umap_result$layout[, 2],
+  n_CCIs  = rowSums(!is.na(mat_genes)),
+  Cluster = factor(clusters[rownames(mat_genes_imputed)])  # match order safely
+)
+
+# ── Plot ──────────────────────────────────────────────────────────────────────
+p_umap <- ggplot(umap_df, aes(x = UMAP1, y = UMAP2, colour = Cluster, label = Gene)) +
+  geom_point(size = 3, alpha = 0.9) +
+  geom_text_repel(
+    size          = 2.8,
+    max.overlaps  = 40,
+    segment.size  = 0.2,
+    segment.alpha = 0.5,
+    show.legend   = FALSE
+  ) +
+  scale_colour_brewer(palette = "Set1", name = "Cluster") +
+  labs(
+    title    = paste0(DATASET, " – Gene UMAP (LRI / CCI LOGFC space)"),
+    subtitle = paste0("Hierarchical clustering (k = ", k_clusters, ", cosine distance)"),
+    x = "UMAP 1", y = "UMAP 2"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"))
+
+ggsave(
+  paste0(DATASET, "_lri_gene_umap.png"),
+  plot   = p_umap,
+  width  = 10,
+  height = 8,
+  dpi    = 300
+)
+
+message("UMAP saved to ", DATASET, "_lri_gene_umap.png")
+
+# ── Print cluster membership so you can inspect them ─────────────────────────
+cluster_df <- umap_df %>% 
+  select(Gene, Cluster, n_CCIs) %>% 
+  arrange(Cluster, Gene)
+print(cluster_df)
+
+cluster_summary <- cluster_df %>%
+  group_by(Cluster) %>%
+  summarise(
+    n_genes = n(),
+    genes   = paste(sort(Gene), collapse = ", ")
+  ) %>%
+  arrange(Cluster)
+
+print(cluster_summary)
+```
+
+## AXL BOXPLOT
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# 1. Prepare the specifically named dataframe
+AXL_Breast_CCI_Boxplot_DF <- Bassez2021_Breast.scDiffComs.cci_table_detected.filtered.malignant[["AXL"]] %>% filter(
+  EMITTER_CELLTYPE != "equivocal", RECEIVER_CELLTYPE != "equivocal"
+) %>%
+  mutate(ER_PAIR = paste(EMITTER_CELLTYPE, "→", RECEIVER_CELLTYPE))
+
+# 2. Create the Plot
+p_axl_boxplot <- ggplot(AXL_Breast_CCI_Boxplot_DF, aes(x = ER_PAIR, y = LOGFC, fill = ER_PAIR)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.4, color = "black") + 
+  geom_jitter(width = 0.2, size = 1.5, alpha = 0.6, aes(color = ER_PAIR)) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  theme_classic(base_size = 12) +
+  labs(
+    title = "AXL In Breast Cancer: L-R LogFC across Emitter-Receiver Pairs",
+    subtitle = "Dataset: Bassez 2021 Breast Cancer",
+    x = "Cell-Type Interaction (Emitter → Receiver)",
+    y = "LogFC"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    legend.position = "none",
+    plot.title = element_text(face = "bold")
+  )
+
+# 3. Display
+print(p_axl_boxplot)
+file_name_boxplot <- "AXL_Breast_CCI_Boxplot.png"
+ggsave(
+  filename = file_name_boxplot,
+  plot     = p_axl_boxplot,  # Using the plot object from the previous step
+  width    = 10,             # Adjust width based on the number of ER pairs
+  height   = 8,
+  dpi      = 300,            # High resolution for thesis/presentation
+  bg       = "white"         # Ensures background isn't transparent
+)
+```
+
+## Cluster Genes x LRI, Combined
+```{r}
+
+library(harmony)
+library(umap)
+
+# --- 1. Helper Function ---
+get_lri_matrix_long <- function(scDiffCom_list, dataset_name) {
+  lapply(names(scDiffCom_list), function(gene) {
+    scDiffCom_list[[gene]] %>%
+      select(LRI, LOGFC) %>%
+      group_by(LRI) %>%
+      summarise(LOGFC = mean(LOGFC, na.rm = TRUE), .groups = "drop") %>%
+      mutate(Gene = gene, Dataset = dataset_name, ID = paste0(gene, "_", dataset_name))
+  }) %>% bind_rows()
+}
+
+# --- 2. Data Loading & Merging ---
+df_breast <- get_lri_matrix_long(Bassez2021_Breast.scDiffComs.cci_table_detected.filtered.malignant, "Breast")
+df_lung   <- get_lri_matrix_long(Chan2021_Lung.malignant, "Lung")
+df_hnscc  <- get_lri_matrix_long(HNSCC_Atlas.malignant, "H&N")
+
+# Find common LRIs (Features) across all cancer types
+common_lris <- Reduce(intersect, list(
+  unique(df_breast$LRI), 
+  unique(df_lung$LRI), 
+  unique(df_hnscc$LRI)
+))
+
+message("Number of common LRIs: ", length(common_lris))
+
+
+# Combine and Filter
+combined_long <- bind_rows(df_breast, df_lung, df_hnscc) %>%
+  filter(LRI %in% common_lris) %>%
+  mutate(ID = paste0(Gene, "_", Dataset))
+
+
+library(tidyverse)
+library(harmony)
+library(umap)
+library(ggrepel)
+library(patchwork)
+
+# --- 3. Scale and Compare Batches ---
+
+# --- 3.1. Preparation & Baseline Matrix ---
+# Assuming combined_long is already created from your previous steps
+mat_wide <- combined_long %>%
+  pivot_wider(id_cols = ID, names_from = LRI, values_from = LOGFC) %>%
+  column_to_rownames("ID")
+
+mat_final <- as.matrix(mat_wide)
+mat_final[is.na(mat_final)] <- 0
+
+meta_data <- data.frame(ID = rownames(mat_final)) %>%
+  separate(ID, into = c("Gene", "Dataset"), sep = "_", remove = FALSE)
+
+# Helper for UMAP plotting
+plot_umap <- function(embeddings, meta, title) {
+  df <- data.frame(
+    UMAP1 = embeddings[,1], 
+    UMAP2 = embeddings[,2], 
+    ID = meta$ID, 
+    Gene = meta$Gene, 
+    Dataset = meta$Dataset
+  )
+  
+  ggplot(df, aes(x = UMAP1, y = UMAP2, color = Dataset)) +
+    geom_point(alpha = 0.4, size = 1) +
+    geom_text_repel(
+      data = filter(df, Gene %in% c("AXL", "EGFR")),
+      aes(label = ID), size = 3, fontface = "bold", color = "black", max.overlaps = 100
+    ) +
+    theme_minimal() +
+    labs(title = title) +
+    theme(legend.position = "bottom")
+}
+
+# --- METHOD 1: Scale only by LRI (Global Scaling) ---
+mat_scaled_lri <- scale(mat_final)
+umap_lri <- umap(mat_scaled_lri, config = umap.defaults)$layout
+p1 <- plot_umap(umap_lri, meta_data, "1. Global LRI Scaling")
+
+# --- METHOD 2: Scale by Dataset (Group-wise Scaling) ---
+# This brings every dataset to the same distribution (mean 0, sd 1) independently
+mat_scaled_ds <- do.call(rbind, lapply(unique(meta_data$Dataset), function(ds) {
+  idx <- which(meta_data$Dataset == ds)
+  # Scale the sub-matrix for this dataset
+  scale(mat_final[idx, , drop = FALSE])
+}))
+# Re-order to match original metadata
+mat_scaled_ds <- mat_scaled_ds[rownames(mat_final), ]
+umap_ds <- umap(mat_scaled_ds, config = umap.defaults)$layout
+p2 <- plot_umap(umap_ds, meta_data, "2. Per-Dataset Scaling")
+
+# --- METHOD 3: Harmony Batch Correction ---
+# Use the Globally Scaled matrix as input for Harmony
+pca_res <- prcomp(mat_scaled_lri, rank. = 30)
+harmony_emb <- HarmonyMatrix(
+  pca_res$x, 
+  meta_data, 
+  "Dataset", 
+  do_pca = FALSE, 
+  verbose = FALSE
+)
+umap_harmony <- umap(harmony_emb, config = umap.defaults)$layout
+p3 <- plot_umap(umap_harmony, meta_data, "3. Harmony Batch Correction")
+
+# --- Combine Plots ---
+(p1 | p2 | p3) + plot_layout(guides = 'collect') & theme(legend.position = 'bottom')
+```
+```{r}
+# --- 1. Enhanced Plotting Function ---
+plot_umap_clear <- function(embeddings, meta, title) {
+  df <- data.frame(
+    UMAP1 = embeddings[,1], 
+    UMAP2 = embeddings[,2], 
+    ID = meta$ID, 
+    Gene = meta$Gene, 
+    Dataset = meta$Dataset
+  )
+  
+  ggplot(df, aes(x = UMAP1, y = UMAP2, color = Dataset)) +
+    # Increased size and decreased alpha for better visibility of clusters
+    geom_point(alpha = 0.6, size = 2) + 
+    # Use geom_label_repel for a white background behind text (easier to read)
+    geom_label_repel(
+      data = filter(df, Gene %in% c("AXL", "EGFR")),
+      aes(label = ID), 
+      size = 4, 
+      fontface = "bold",
+      color = "black",
+      box.padding = 0.8,      # More space around labels
+      point.padding = 0.5,    # Space between point and label
+      segment.color = 'grey50',
+      max.overlaps = Inf,     # Force all labels to show
+      fill = alpha(c("white"), 0.8)
+    ) +
+    theme_minimal(base_size = 14) + # Larger base font size
+    labs(title = title) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 18),
+      panel.grid.minor = element_blank() # Clean up the background
+    )
+}
+
+# --- 2. Generate the Individual Plots ---
+p1_v2 <- plot_umap_clear(umap_lri, meta_data, "1. Global LRI Scaling")
+p2_v2 <- plot_umap_clear(umap_ds, meta_data, "2. Per-Dataset Scaling")
+p3_v2 <- plot_umap_clear(umap_harmony, meta_data, "3. Harmony Integration")
+
+# --- 3. Combine with Wide Layout ---
+# Use plot_layout to give each plot plenty of horizontal breathing room
+final_plot <- (p1_v2 | p2_v2 | p3_v2) + 
+  plot_layout(guides = 'collect') & 
+  theme(legend.position = 'bottom', legend.text = element_text(size = 14))
+
+# --- 4. EXPORTING: The Secret to Clarity ---
+# If you are in RStudio, the 'Plots' pane will always squash this.
+# You MUST save it to a file or set chunk options to see the clarity.
+ggsave(
+  filename = "LRI_Integration_Comparison.png", 
+  plot = final_plot, 
+  width = 22,   # Very wide
+  height = 8,   # Tall enough for labels
+  dpi = 300,    # High resolution
+  bg = "white"
+)
+
+library(plotly)
+
+# 1. Create the dataframe specifically for the interactive plot
+# Using the coordinates from the Harmony integration (umap_harmony)
+df_interactive <- data.frame(
+  UMAP1 = umap_harmony[, 1],
+  UMAP2 = umap_harmony[, 2],
+  ID = meta_data$ID,
+  Gene = meta_data$Gene,
+  Dataset = meta_data$Dataset
+)
+
+# 2. Build the ggplot object using this new dataframe
+p_interact <- ggplot(df_interactive, aes(x = UMAP1, y = UMAP2, color = Dataset, text = ID)) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  theme_minimal() +
+  labs(
+    title = "Interactive Harmony Integration",
+    subtitle = "Hover over points to see the specific Gene_Dataset ID"
+  )
+
+# my.save.RData("p_interact", myfolder="~/Thesis/CCC/outputs/plots", is.load.obj = T)
+# 3. Turn it into an interactive widget
+# The 'tooltip = "text"' part tells plotly to show the 'ID' we defined in the aes()
+ggplotly(p_interact, tooltip = "text")
+```
+
+## P-VALUE PER GENE, 
+```{r}
+# ══════════════════════════════════════════════════════════════════════════════
+#  FISHER ENRICHMENT: UP/DOWN REGULATION PER GENE × EMITTER–RECEIVER–GO-BP
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 0.  CONFIG ────────────────────────────────────────────────────────────────
+MALIGNANT_TYPE  <- "Epithelial"
+MIN_GO_SIZE     <- 5     # skip GO-BP with fewer than this many raw LRI-GO pairs
+MIN_DETECTED    <- 2     # skip if fewer than this many DE interactions in GO
+SAVE_EVERY      <- 1    # checkpoint every N genes
+CHECKPOINT_FILE <- "fisher_results_checkpoint.rds"
+FINAL_FILE      <- "fisher_results_final.rds"
+
+# ── 1.  CORE FUNCTION: fisher for one gene ────────────────────────────────────
+compute_fisher_for_gene <- function(sc_obj, gene_name, LRI_GO_BP,
+                                    malignant_type  = MALIGNANT_TYPE,
+                                    min_go_size     = MIN_GO_SIZE,
+                                    min_detected    = MIN_DETECTED) {
+
+  # ── 1a. Extract tables ─────────────────────────────────────────────────────
+  # Use the shared helper for detected (handles IS_CCI_DE + finite LOGFC)
+  detected <- filter.scDiffCom.cci_table_detected.for.malignant(
+    sc_obj,
+    malignant_celltype = malignant_type
+  )
+
+  # Mirror the same cell-type filter for raw (no DE/LOGFC conditions on raw)
+  raw <- sc_obj@cci_table_raw %>%
+    filter(
+      EMITTER_CELLTYPE  == malignant_type |
+      RECEIVER_CELLTYPE == malignant_type
+    )
+
+  if (nrow(detected) == 0) return(NULL)
+
+  # ── 1b. Join GO annotations ────────────────────────────────────────────────
+  raw_go <- raw %>%
+    inner_join(LRI_GO_BP, by = "LRI", relationship = "many-to-many")
+
+  detected_go <- detected %>%
+    inner_join(LRI_GO_BP, by = "LRI", relationship = "many-to-many")
+
+  if (nrow(detected_go) == 0) return(NULL)
+
+  # ── 1c. Pre-compute background counts per (E, R, GO) ──────────────────────
+  raw_counts <- raw_go %>%
+    count(EMITTER_CELLTYPE, RECEIVER_CELLTYPE, GO_NAME, name = "n_raw_in_go")
+
+  raw_total_er <- raw_go %>%
+    count(EMITTER_CELLTYPE, RECEIVER_CELLTYPE, name = "n_raw_total")
+
+  # ── 1d. Pre-compute detected counts per (E, R, GO, REGULATION) ────────────
+  det_counts <- detected_go %>%
+    count(EMITTER_CELLTYPE, RECEIVER_CELLTYPE, GO_NAME, REGULATION,
+          name = "n_det_in_go_reg")
+
+  det_total_er_reg <- detected_go %>%
+    count(EMITTER_CELLTYPE, RECEIVER_CELLTYPE, REGULATION,
+          name = "n_det_total_reg")
+
+  # ── 1e. Build testable contexts ────────────────────────────────────────────
+  contexts <- det_counts %>%
+    filter(n_det_in_go_reg >= min_detected) %>%
+    left_join(raw_counts,       by = c("EMITTER_CELLTYPE", "RECEIVER_CELLTYPE", "GO_NAME")) %>%
+    left_join(raw_total_er,     by = c("EMITTER_CELLTYPE", "RECEIVER_CELLTYPE")) %>%
+    left_join(det_total_er_reg, by = c("EMITTER_CELLTYPE", "RECEIVER_CELLTYPE", "REGULATION")) %>%
+    filter(!is.na(n_raw_in_go), n_raw_in_go >= min_go_size)
+
+  if (nrow(contexts) == 0) return(NULL)
+
+  # ── 1f. Run Fisher per context ─────────────────────────────────────────────
+  results <- vector("list", nrow(contexts))
+
+  for (i in seq_len(nrow(contexts))) {
+    a <- contexts$n_det_in_go_reg[i]
+    b <- contexts$n_det_total_reg[i]   - a
+    c <- contexts$n_raw_in_go[i]       - a
+    d <- contexts$n_raw_total[i] - contexts$n_raw_in_go[i] - b
+
+    if (any(c(a, b, c, d) < 0)) next
+
+    ft <- fisher.test(matrix(c(a, b, c, d), nrow = 2))
+
+    results[[i]] <- data.frame(
+      Gene              = gene_name,
+      GO_NAME           = contexts$GO_NAME[i],
+      EMITTER_CELLTYPE  = contexts$EMITTER_CELLTYPE[i],
+      RECEIVER_CELLTYPE = contexts$RECEIVER_CELLTYPE[i],
+      REGULATION        = contexts$REGULATION[i],
+      odds_ratio        = ft$estimate,
+      p_value           = ft$p.value,
+      stringsAsFactors  = FALSE
+    )
+  }
+
+  bind_rows(results)
+}
+
+# ── 2.  MAIN LOOP WITH CHECKPOINTING ─────────────────────────────────────────
+gene_names  <- names(Bassez2021_Breast.scDiffComs)
+n_genes     <- length(gene_names)
+
+# Resume from checkpoint if it exists
+if (file.exists(CHECKPOINT_FILE)) {
+  checkpoint    <- readRDS(CHECKPOINT_FILE)
+  completed     <- checkpoint$completed
+  results_so_far <- checkpoint$results
+  cat(sprintf("Resuming from checkpoint: %d / %d genes done\n",
+              length(completed), n_genes))
+} else {
+  completed      <- character(0)
+  results_so_far <- list()
+}
+
+genes_todo <- setdiff(gene_names, completed)
+cat(sprintf("Genes remaining: %d\n", length(genes_todo)))
+
+for (idx in seq_along(genes_todo)) {
+  g <- genes_todo[idx]
+
+  res <- tryCatch(
+    compute_fisher_for_gene(
+      sc_obj    = Bassez2021_Breast.scDiffComs[[g]],
+      gene_name = g,
+      LRI_GO_BP = LRI_GO_BP
+    ),
+    error = function(e) {
+      cat(sprintf("  [!] Error on gene %s: %s\n", g, conditionMessage(e)))
+      NULL
+    }
+  )
+
+  if (!is.null(res) && nrow(res) > 0) {
+    results_so_far[[g]] <- res
+  }
+  completed <- c(completed, g)
+
+  # Progress (one line, not per-context noise)
+  if (idx %% 10 == 0 || idx == length(genes_todo)) {
+    cat(sprintf("  Progress: %d / %d genes  (%d total rows so far)\n",
+                idx, length(genes_todo),
+                sum(sapply(results_so_far, nrow))))
+  }
+
+  # Periodic checkpoint
+  if (idx %% SAVE_EVERY == 0) {
+    saveRDS(list(completed = completed, results = results_so_far),
+            CHECKPOINT_FILE)
+    cat(sprintf("  [checkpoint saved at gene %d]\n", idx))
+  }
+}
+
+# ── 3.  COMBINE, BH-CORRECT, SAVE ─────────────────────────────────────────────
+all_results <- bind_rows(results_so_far) %>%
+  group_by(EMITTER_CELLTYPE, RECEIVER_CELLTYPE, GO_NAME, REGULATION) %>%
+  mutate(bh_p_val = p.adjust(p_value, method = "BH")) %>%
+  ungroup() %>%
+  select(Gene, GO_NAME, EMITTER_CELLTYPE, RECEIVER_CELLTYPE,
+         REGULATION, odds_ratio, p_value, bh_p_val) %>%
+  arrange(bh_p_val)
+
+saveRDS(all_results, FINAL_FILE)
+cat(sprintf("Done. %d rows written to %s\n", nrow(all_results), FINAL_FILE))
+```
+
+## Volcano
+```{r}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  VOLCANO PLOT: Emitter–Receiver–GO-BP  for selected genes
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 0.  CONFIG ────────────────────────────────────────────────────────────────
+SELECTED_GENES  <- c("ESR1","ERBB2", "HLA-A", "MKI67")   # <-- edit as needed
+P_ADJ_CUTOFF    <- 0.05
+OR_CUTOFF       <- 1.5    # odds ratio threshold for labelling
+TOP_LABEL_N     <- 7     # max GO labels per facet to avoid overplotting
+BOLD_GO_TERMS <- c("extracellular matrix organization", "angiogenesis", "	extracellular structure organization")
+
+file_name <- paste(SELECTED_GENES, collapse="_")
+
+
+
+# ── 1.  PREPARE DATA ──────────────────────────────────────────────────────────
+fisher_res <- readRDS("~/Thesis/CellChat/scripts/fisher_results_final.rds")
+
+fisher_res_sig <- fisher_res %>%
+  filter(
+    bh_p_val < P_ADJ_CUTOFF,
+    is.finite(odds_ratio),
+    is.finite(bh_p_val),
+    REGULATION == "UP"
+  ) %>%
+  mutate(is_sig = bh_p_val < P_ADJ_CUTOFF)
+
+# In volcano_df mutate — simplify is_sig to just p-value
+
+cat(sprintf(
+  "Significant results: %d / %d rows (%.1f%%)\n",
+  nrow(fisher_res_sig), nrow(fisher_res),
+  100 * nrow(fisher_res_sig) / nrow(fisher_res)
+))
+
+
+volcano_df <- fisher_res_sig %>%
+  filter(
+    Gene    %in% SELECTED_GENES,
+  ) %>%
+  mutate(
+    ER_PAIR    = paste(EMITTER_CELLTYPE, "→", RECEIVER_CELLTYPE),
+    log2_OR    = log2(odds_ratio),                 # ← compute here
+    neg_log_p  = -log10(bh_p_val),
+    label_text = ifelse(is_sig, GO_NAME, "")
+  ) %>%
+  group_by(Gene) %>%
+  mutate(
+    rank_p     = rank(-neg_log_p, ties.method = "first"),
+    label_text = ifelse(is_sig & rank_p <= TOP_LABEL_N, GO_NAME, "")
+  ) %>%
+  ungroup()
+
+volcano_df <- volcano_df %>%
+  mutate(
+    fontface = ifelse(GO_NAME %in% BOLD_GO_TERMS, "bold", "plain")
+  )
+
+# ── 2.  COLOUR PALETTE ────────────────────────────────────────────────────────
+all_pairs <- unique(volcano_df$ER_PAIR)
+n_pairs   <- length(all_pairs)
+er_pal    <- setNames(
+  colorRampPalette(RColorBrewer::brewer.pal(min(8, n_pairs), "Dark2"))(n_pairs),
+  all_pairs
+)
+
+# ── 3.  PLOT ──────────────────────────────────────────────────────────────────
+p_volcano <- ggplot(
+    volcano_df,
+    aes(x = log2_OR, y = neg_log_p, colour = ER_PAIR)
+  ) +
+
+  # ── reference line: significance only, no OR cutoff lines ─────────────────
+  geom_hline(yintercept = -log10(P_ADJ_CUTOFF),
+             linetype = "dashed", colour = "grey50", linewidth = 0.4) +
+
+  # ── non-significant points ─────────────────────────────────────────────────
+  geom_point(
+    data    = filter(volcano_df, !is_sig),
+    colour  = "grey80", size = 1, alpha = 0.5
+  ) +
+
+  # ── significant points ─────────────────────────────────────────────────────
+  geom_point(
+    data = filter(volcano_df, is_sig),
+    aes(colour = ER_PAIR),
+    size = 2.2, alpha = 0.85
+  ) +
+
+  # ── GO-BP labels ───────────────────────────────────────────────────────────
+  ggrepel::geom_text_repel(
+
+    data          = filter(volcano_df, label_text != ""),
+
+    aes(label     = label_text, colour = ER_PAIR, fontface = fontface),
+
+    size          = 2.4,
+
+    max.overlaps  = 20,
+
+    segment.size  = 0.3,
+
+    segment.alpha = 0.5,
+
+    show.legend   = FALSE,
+
+    box.padding   = 0.3
+
+  ) + 
+
+
+
+facet_wrap(~ Gene, scales = "free_y", nrow = 2) +
+
+
+  scale_colour_manual(values = er_pal) +
+
+  scale_x_continuous(
+
+    name   = expression(log[2]~"(Odds Ratio)"),
+
+    labels = scales::number_format(accuracy = 0.1)
+
+  ) +
+
+  scale_y_continuous(
+
+    name = expression(-log[10]~"(BH p-value)")
+
+  ) +
+
+
+
+  theme_classic(base_size = 12) +
+
+  theme(
+
+    strip.text       = element_text(face = "bold", size = 13),
+
+    strip.background = element_blank(),
+
+    legend.position  = "bottom",
+
+    legend.title     = element_text(face = "bold"),
+
+    legend.text      = element_text(size = 8),
+
+    panel.grid.major = element_line(colour = "grey95")
+
+  ) +
+
+  guides(colour = guide_legend(
+
+    title        = "Emitter → Receiver",
+
+    nrow         = ceiling(n_pairs / 3),
+
+    override.aes = list(size = 3, alpha = 1)
+
+  )) +
+
+  labs(
+
+    title    = "GO-BP Enrichment Volcano",
+
+    subtitle = sprintf("BH p < %.2f  |  top %d GO labels per gene",
+
+                       P_ADJ_CUTOFF, TOP_LABEL_N)
+
+  )
+print(p_volcano)
+
+# ── 4.  SAVE ──────────────────────────────────────────────────────────────────
+ggsave(
+  filename = paste0(file_name, "_volcano.png"),
+  plot     = p_volcano,
+  width    = 8,
+  height   = 11,
+  dpi      = 300
+)
+
+for (current_gene in SELECTED_GENES) {
+  
+  # Subset for the specific gene
+  gene_data <- volcano_df %>% filter(Gene == current_gene)
+  
+  p_individual <- ggplot(
+    gene_data, 
+    aes(x = log2_OR, y = neg_log_p, colour = ER_PAIR)
+  ) +
+    # Reference line for significance
+    geom_hline(yintercept = -log10(P_ADJ_CUTOFF), 
+               linetype = "dashed", colour = "grey50", linewidth = 0.4) +
+    
+    # Points
+    geom_point(size = 2.8, alpha = 0.85) +
+    
+    # Labels
+    ggrepel::geom_text_repel(
+      data = filter(gene_data, label_text != ""),
+      aes(label = label_text, fontface = fontface),
+      size = 3, max.overlaps = 20, segment.size = 0.3
+    ) +
+    
+    # Apply global colors and hide the legend
+    scale_colour_manual(values = er_pal) +
+    
+    labs(
+      title = paste(current_gene),
+      x = expression(log[2]~"(Odds Ratio)"),
+      y = expression(-log[10]~"(BH p-value)")
+    ) +
+    
+    theme_classic(base_size = 12) +
+    theme(
+      legend.position = "none",  # <--- This removes the legend
+      plot.title = element_text(face = "bold", size = 14),
+      panel.grid.major = element_line(colour = "grey95")
+    )
+
+  # Save individual file
+  ggsave(
+    filename = paste0(current_gene, "_volcano_no_legend.png"),
+    plot     = p_individual,
+    width    = 7,
+    height   = 7,
+    dpi      = 300
+  )
+}
+```
+
+
+
+
+# Playground - Check objects after running pipeline
+```{r}
+
+```
+

@@ -1,0 +1,560 @@
+#installation
+```{r}
+devtools::install_github("CyrilLagger/scDiffCom")
+devtools::install_github("DKFZ-E220/HNSCatlas")
+library(scDiffCom)
+library(Seurat)
+library(dplyr)
+source("~/Thesis/CellChat/scripts/utils/my.utils.R")
+
+LOCAL_DROPBOX_DIR_PATH = file.path("~/Dropbox")
+LOCAL_DIRECTORY_WORKING_DIR = file.path(LOCAL_DROPBOX_DIR_PATH, "gigiadir/CellChat/scripts")
+```
+
+# Example - Kurten.2021.Seurat
+```{r}
+library(future)
+plan(sequential)  
+options(future.globals.maxSize = Inf)    # disable the limit
+options(future.globals.onReference = "ignore")
+
+
+Kurten.2021.AXL.Expression <- add_gene_expression_group(Kurten.2021.Seurat, assay="alra", gene="AXL")
+Kurten.2021.Seurat <- Kurten.2021.AXL.Expression$seurat_obj
+
+Valid.Cell.Types.For.scDiffCom <- Kurten.2021.Seurat@meta.data %>% 
+  filter(cell_type != "") %>%  
+  group_by(cell_type) %>% 
+  filter(all(c("HIGH", "LOW") %in% AXL_EXP)) %>% 
+  pull(cell_type) %>% 
+  unique()
+
+Kurten.2021.Seurat.scDiffCom.Base <- subset(
+    Kurten.2021.Seurat, 
+    subset = cell_type %in% Valid.Cell.Types.For.scDiffCom & !is.na(AXL_EXP)
+)
+
+
+options(scDiffCom.no_parallel = TRUE)
+options(future.globals.maxSize = 20 * 1024^3)   # 20 GB
+Kurten.2021.scDiffCom.Object <- run_interaction_analysis(
+  seurat_object = Kurten.2021.Seurat.scDiffCom.Base,
+  seurat_assay="alra",
+  LRI_species = "human",
+  seurat_celltype_id = "cell_type",
+  seurat_condition_id = list(
+    column_name="AXL_EXP",
+    cond1_name="HIGH",
+    cond2_name="LOW"
+  ),
+  iterations = 1000
+)
+
+```
+## View results on Shiny
+```{r}
+if (!require("shiny")) install.packages("shiny")
+if (!require("shinyWidgets")) install.packages("shinyWidgets")
+if (!require("shinythemes")) install.packages("shinythemes")
+if (!require("DT")) install.packages("DT")
+if (!require("kableExtra")) install.packages("kableExtra")
+if (!require("RColorBrewer")) install.packages("RColorBrewer")
+if (!require("igraph")) install.packages("igraph")
+if (!require("visNetwork")) install.packages("visNetwork")
+if (!require("plotly")) install.packages("plotly")
+if (!require("GOSemSim")) BiocManager::install("GoSemSim")
+if (!require("rrvgo")) BiocManager::install("rrvgo")
+if (!require("org.Mm.eg.db")) BiocManager::install("org.Mm.eg.db")
+```
+
+```{r}
+BuildShiny(Kurten.2021.scDiffCom.Object)
+```
+
+```{r}
+CCI_detected <- GetTableCCI(Kurten.2021.scDiffCom.Object, type = "detected", simplified = TRUE)
+if (!require("ggplot2")) install.packages("ggplot2")
+library(ggplot2)
+
+ggplot(
+  CCI_detected,
+  aes(
+     x = LOGFC,
+     y = -log10(BH_P_VALUE_DE + 1E-2),
+     colour = REGULATION
+  )
+) + geom_point(
+) + scale_colour_manual(
+  values = c("UP" = "red", "DOWN" = "blue", "FLAT" = "green", "NSC" = "grey")
+) + xlab(
+  "log(FC)"
+) + ylab(
+  "-log10(Adj. p-value)"
+)
+
+```
+
+```{r}
+PlotORA(
+  object = Kurten.2021.scDiffCom.Object,
+  category = "LRI",
+  regulation = "UP"
+) + theme(
+  legend.position = c(0.85, 0.4),
+  legend.key.size = unit(0.4, "cm")
+)
+```
+
+
+
+
+
+# scDiffCom Pipeline
+
+## Util Functions
+```{r}
+#
+#  my.utils.R
+#    - add_gene_expression_group 
+library(Seurat)
+library(dplyr)
+library(scDiffCom)
+source("~/Thesis/CellChat/scripts/utils/my.utils.R")
+
+
+get_valid_cell_types <- function(seurat_obj) {
+  valid_cell_types <- seurat_obj@meta.data %>%
+    filter(cell_type != "" & AXL_EXP %in% c("HIGH", "LOW")) %>%
+    group_by(cell_type) %>%
+    filter(all(c("HIGH", "LOW") %in% AXL_EXP)) %>%
+    pull(cell_type) %>%
+    unique()
+  
+  message(sprintf("Found %d valid cell types present in both HIGH and LOW groups", 
+                 length(valid_cell_types)))
+  
+  return(valid_cell_types)
+}
+
+get_patient_col <- function(seurat_obj, patient_col_options) {
+  cell_metadata <- seurat_obj@meta.data
+  available_cols <- colnames(cell_metadata)
+
+  patient_col <- NULL
+  for(col in patient_col_options) {
+    if (col %in% available_cols) {
+      patient_col <- col
+      cat(sprintf("  Using patient column: %s\n", patient_col))
+      break
+    }
+  }
+  
+  return(patient_col)
+}
+
+
+```
+
+
+
+## Load Data
+```{r}
+SEURAT_OBJECTS_DIR <- file.path(DROPBOX_DIR_PATH, "hadasra/thesis/test_objects")
+SEURAT_OBJECTS_OUTPUT_DIR <- file.path("~/Thesis/CellChat/outputs/scDiffCom/Seurats")
+
+all_seurat_files <- list.files(SEURAT_OBJECTS_DIR, pattern = "\\.RDS$", full.names = TRUE, ignore.case = TRUE)
+
+process_seurat_files <- function(
+    file_paths,
+    output_dir = "processed_seurat_objects",
+    log_file = "skipped_datasets.txt",
+    gene = "AXL",
+    patient_col_options = c("orig.ident"),
+    quantiles = c(1/3, 2/3),
+    min_samples = 12,
+    min_target_cells = 500
+) {
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  
+  writeLines(c(
+    paste("Processing Log -", Sys.time()),
+    "file_name\treason\tdetails",
+    "---------------------------------------------------"
+  ), con = log_file)
+  
+  log_skip <- function(name, reason, details) {
+    line <- sprintf("%s\t%s\t%s", name, reason, details)
+    write(line, file = log_file, append = TRUE)
+    cat(sprintf("  -> SKIPPING: %s (%s)\n", reason, details))
+  }
+  
+  
+  cat(sprintf("Processing %d files...\n\n", length(file_paths)))
+  cat(sprintf("Logging skipped datasets to: %s\n\n", log_file))
+  
+  for (i in seq_along(file_paths)) {
+    file_path <- file_paths[i]
+    file_name <- basename(file_path)
+    object_name <- gsub("\\.RDS$", "", file_name, ignore.case = TRUE)
+    
+    cat(sprintf("[%d/%d] Processing %s...\n", i, length(file_paths), file_name))
+    
+    tryCatch({
+      seurat_obj <- readRDS(file_path)
+      cat(sprintf("  Loaded: %d cells, %d features\n", ncol(seurat_obj), nrow(seurat_obj)))
+      
+      patient_col <- get_patient_col(seurat_obj = seurat_obj, 
+                                     patient_col_options = patient_col_options)
+      
+      # Validate Sample num
+      n_samples <- length(unique(seurat_obj@meta.data[[patient_col]]))
+      
+      if (n_samples < min_samples) {
+        log_skip(file_name, "Low Sample Count", sprintf("Found %d samples (Min: %d)", n_samples, min_samples))
+        next 
+      }
+      
+      # Validate more than N = 500 Malignant
+      if (!"cell_type" %in% colnames(seurat_obj@meta.data)) {
+        log_skip(file_name, "Missing Column", "'cell_type' column not found in metadata")
+        next
+      }
+
+      cell_identities <- as.character(seurat_obj@meta.data$cell_type)
+      
+      # Regex to match Epithelial, Tumor, Cancer, or Malignant (case insensitive)
+      target_pattern <- "Epithelial|Tumor|Cancer|Malignant"
+      n_target_cells <- sum(grepl(target_pattern, cell_identities, ignore.case = TRUE))
+      
+      if (n_target_cells < min_target_cells) {
+        log_skip(file_name, "Low Target Cells", sprintf("Found %d matching '%s' (Min: %d)", n_target_cells, target_pattern, min_target_cells))
+        next 
+      }
+      
+      result <- add_gene_expression_group(
+        seurat_obj = seurat_obj,
+        gene = gene,
+        patient_col = patient_col,
+        quantiles = quantiles
+      )
+      
+      # Extract results
+      updated_seurat <- result$seurat_obj
+      patient_summary <- result$patient_summary
+      
+      cat(sprintf("  Added %s_EXP grouping: %d patients\n", gene, nrow(patient_summary)))
+      
+      output_file <- file.path(output_dir, paste0(object_name, "_processed.rds"))
+      
+      force(result) 
+      
+      saveRDS(result, file=output_file)
+      cat(sprintf("  ✓ Saved to: %s\n", output_file))
+      
+    }, error = function(e) {
+      cat(sprintf("  ✗ Error: %s\n", e$message))
+    }, finally = {
+      # --- FIX 3: Memory Cleanup ---
+      # Remove large objects from the current environment to help R free memory
+      if (exists("seurat_obj")) rm(seurat_obj)
+      if (exists("result")) rm(result)
+      if (exists("updated_seurat")) rm(updated_seurat)
+      
+      # Force garbage collection to return memory to OS (crucial for heavy Seurat loops)
+      gc(verbose = FALSE)
+      cat("\n") 
+    })
+  }
+  cat("=== PROCESSING COMPLETE ===\n")
+  cat(sprintf("All processed files saved to: %s\n", output_dir))
+}
+```
+
+
+```{r}
+selected_files <- all_seurat_files
+
+process_seurat_files(selected_files, 
+                     gene="AXL",
+                     patient_col_options = c("sampleID", "orig.ident"),
+                     output_dir = SEURAT_OBJECTS_OUTPUT_DIR)
+```
+
+
+
+## Main Pipeline
+```{r}
+Run.scDiffCom.Pipeline.For.Seurat <- function(seurat_obj) {
+  valid_cell_types <- get_valid_cell_types(seurat_obj)
+  
+  seurat_obj_for_scDiffCom <- subset(
+      seurat_obj, 
+      subset = cell_type %in% valid_cell_types & !is.na(AXL_EXP)
+  )
+  scDiffCom_object <- run_interaction_analysis(
+    seurat_object = seurat_obj_for_scDiffCom,
+    LRI_species = scDiffCom.Pipeline.Config$LRI_species,
+    seurat_celltype_id = scDiffCom.Pipeline.Config$celltype_column,
+    seurat_condition_id = list(
+      column_name="AXL_EXP",
+      cond1_name="HIGH",
+      cond2_name="LOW"
+    ),
+    iterations = scDiffCom.Pipeline.Config$iterations
+  )
+  
+  return(scDiffCom_object)
+}
+
+scDiffCom.Pipeline.Runner <- function(
+    file_paths,
+    output_dir = "scDiffCom_results"
+) {
+  # Create output directory if it doesn't exist
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  
+  cat(sprintf("Processing %d files...\n\n", length(file_paths)))
+  
+  for (i in seq_along(file_paths)) {
+    processed_file <- file_paths[i]
+    
+    if (!file.exists(processed_file)) {
+      cat(sprintf("[%d/%d] ✗ File not found: %s\n\n", i, length(file_paths), processed_file))
+      next
+    }
+    
+    file_name <- basename(processed_file)
+    object_name <- gsub("_processed\\.(RDS|rds)$", "", file_name, ignore.case = TRUE)
+
+    cat(sprintf("[%d/%d] Processing %s...\n", i, length(file_paths), object_name))
+    
+    tryCatch({
+      # Load processed file with grouped data
+      cat("  Loading processed file...\n")
+      processed_with_group_result <- readRDS(processed_file)
+      
+      # Extract Seurat object and patient summary from the result
+      seurat_obj <- processed_with_group_result$seurat_obj
+      patient_summary <- processed_with_group_result$patient_summary
+      
+      cat(sprintf("  Loaded: %d cells, %d features, %d patients\n", 
+                  ncol(seurat_obj), nrow(seurat_obj), nrow(patient_summary)))
+      
+      # Check if AXL_EXP column exists
+      if (!"AXL_EXP" %in% colnames(seurat_obj@meta.data)) {
+        cat("  ✗ Warning: AXL_EXP column not found, skipping...\n\n")
+        next
+      }
+      
+      # Count cells with AXL_EXP annotation
+      axl_annotated <- sum(!is.na(seurat_obj@meta.data$AXL_EXP))
+      axl_high <- sum(seurat_obj@meta.data$AXL_EXP == "HIGH", na.rm = TRUE)
+      axl_low <- sum(seurat_obj@meta.data$AXL_EXP == "LOW", na.rm = TRUE)
+      
+      cat(sprintf("  AXL_EXP annotated: %d cells (HIGH: %d, LOW: %d)\n", 
+                  axl_annotated, axl_high, axl_low))
+      
+      if (axl_annotated == 0) {
+        cat("  ✗ Warning: No cells with AXL_EXP annotation, skipping...\n\n")
+        next
+      }
+      
+      # Run scDiffCom pipeline
+      cat("  Running scDiffCom pipeline...\n")
+      scDiffCom_object <- Run.scDiffCom.Pipeline.For.Seurat(seurat_obj)
+      
+      cat("  scDiffCom analysis complete\n")
+      # Save results
+      output_file <- file.path(output_dir, paste0(object_name, "_scDiffCom.RDS"))
+      
+      cat("  Saving results...\n")
+      force(scDiffCom_object)
+      saveRDS(scDiffCom_object, output_file)
+      
+      cat(sprintf("  ✓ Saved to: %s\n\n", output_file))
+      
+    }, error = function(e) {
+      cat(sprintf("  ✗ Error: %s\n\n", e$message))
+    })
+  }
+  
+  cat("=== PIPELINE COMPLETE ===\n")
+  cat(sprintf("All scDiffCom results saved to: %s\n", output_dir))
+  
+}
+```
+
+## Pipeline Config
+```{r}
+scDiffCom.Pipeline.Config <- list (
+  # QC
+  gene = "AXL",
+  assay = "RNA",
+  min_samples = 12,
+  min_epithelial_cells = 500,
+  epithelial_cell_types = c("Epithelial", "Malignant", "Tumor", "Cancer"),
+  
+  # scDiffCom parameters
+  iterations = 10000,
+  LRI_species = "human",
+  celltype_column = "cell_type",
+  
+  # Parallel processing
+  n_workers = 1,
+  
+  # Output
+  output_dir = "~/Thesis/CellChat/outputs/scDiffCom"
+)
+```
+## Pipeline Runner
+```{r}
+
+all_processed_files <- list.files("~/Thesis/CellChat/outputs/scDiffCom/Seurats", full.names = TRUE)
+
+selected_files <- c("/gpfs0/bgu-ofircohen/users/gigiadir/Thesis/CellChat/outputs/scDiffCom/Seurats/Kurten2021_Head_and_Neck_processed.rds")
+
+scDiffCom.Pipeline.Runner(file_paths = selected_files,
+                          output_dir="~/Thesis/CellChat/outputs/scDiffCom/scDiffComs")
+```
+
+## Inspect Shiny
+```{r}
+
+scDiffCom.Output.Path <- "~/Thesis/CellChat/outputs/scDiffCom/scDiffComs"
+
+selected_scDiffCom_obj_path <- file.path(scDiffCom.Output.Path, "Kurten2021_Head_and_Neck_scDiffCom.RDS")
+
+selected_scDiffCom_obj <- readRDS(selected_scDiffCom_obj_path)
+
+BuildShiny(selected_scDiffCom_obj)
+```
+
+
+
+# scDiffCom Pipeline - V2
+
+## Load Data
+```{r}
+V3.Pipeline.Config <- list(
+  #Seurat Parsing Config
+  n.var.genes = 5000
+)
+
+my.save.RData("Bassez.2021.Seurat", myfolder="~/Thesis/CellChat/outputs/data", is.load.obj = T)
+my.save.RData("Bassez.2021.Seurat", myfolder=file.path(DROPBOX_DIR_PATH, "Cancer_DB/SC.3CA.Tirosh/Breast"), is.load.obj = T)
+
+HNSCC.Atlas <- readRDS(file.path(CANCER_DB_DIR_PATH, "SingleCell_Data_Misc/HNSCC_Atlas.rds"))
+DefaultAssay(HNSCC.Atlas) <- "RNA"
+my.save.RData("HNSCC.Atlas", myfolder="~/Thesis/CellChat/outputs/data", is.load.obj = T)
+
+
+Chan.2021.Seurat <- readRDS(file.path(CANCER_DB_DIR_PATH,"SC.3CA.Tirosh/SeuratObjects_10x_cellnames_with_project/Chan2021_Lung.RDS"))
+
+Chan.2021.Seurat <- subset(Chan.2021.Seurat, orig.ident != "PleuralEffusion")
+Chan.2021.Seurat$orig.ident <- droplevels(Chan.2021.Seurat$orig.ident)
+
+my.save.RData("Chan.2021.Seurat", myfolder="~/Thesis/CellChat/outputs/data")
+
+Hadas.Directory <- file.path("~/../hadasra/thesis/new_objects")
+Biermann.Melanoma.Seurat <- readRDS(file.path(Hadas.Directory, "Biermann2022_Skin.RDS"))
+Chen.Prostate.Seurat <- readRDS(file.path(Hadas.Directory, "Chen2021_Prostate.RDS"))
+Sharma.Liver.Seurat <- readRDS(file.path(Hadas.Directory, "Sharma2020_Liver_Biliary.RDS"))
+Young.Kidney.Seurat <- readRDS(file.path(Hadas.Directory, "Young2018_Kidney.RDS"))
+```
+
+## FindVariableFeatures in Malignant
+```{r}
+HNSCC.Atlas.Malignant.Seurat <- subset(HNSCC.Atlas, Cell_Type == "Epithelial")
+HNSCC.Atlas.Malignant.Seurat <- FindVariableFeatures(HNSCC.Atlas.Malignant.Seurat,
+                                                     nfeatures = V3.Pipeline.Config$n.var.genes)
+HNSCC.Atlas.Malignant.Top.5000.Genes <- VariableFeatures(HNSCC.Atlas.Malignant.Seurat)
+
+
+Bassez.2021.Malignant.Seurat <- subset(Bassez.2021.Seurat, cell_type == "Malignant")
+Bassez.2021.Malignant.Seurat <- FindVariableFeatures(Bassez.2021.Malignant.Seurat,
+                                                     nfeatures = V3.Pipeline.Config$n.var.genes)
+Bassez.2021.Malignant.Top.5000.Genes <- VariableFeatures(Bassez.2021.Malignant.Seurat)
+
+
+Chan.2021.Malignant.Seurat <- subset(Chan.2021.Seurat, cell_type %in% c("Epithelial", "Malignant"))
+Chan.2021.Malignant.Seurat <- FindVariableFeatures(Chan.2021.Malignant.Seurat,
+                                                   nfeatures = V3.Pipeline.Config$n.var.genes)
+Chan.2021.Malignant.Top.5000.Genes <- VariableFeatures(Chan.2021.Malignant.Seurat)
+
+Biermann.Melanoma.Malignant.Seurat <- subset(Biermann.Melanoma.Seurat, Consensus_Cell_Type == "Epithelial")
+Biermann.Melanoma.Malignant.Seurat <- FindVariableFeatures(Biermann.Melanoma.Malignant.Seurat,
+                                                           nfeatures = V3.Pipeline.Config$n.var.genes)
+Biermann.Melanoma.Malignant.Top.5000.Genes <- VariableFeatures(Biermann.Melanoma.Malignant.Seurat)
+
+Chen.Prostate.Malignant.Seurat <- subset(Chen.Prostate.Seurat, Consensus_Cell_Type == "Epithelial")
+Chen.Prostate.Malignant.Seurat <- FindVariableFeatures(Chen.Prostate.Malignant.Seurat,
+                                                           nfeatures = V3.Pipeline.Config$n.var.genes)
+Chen.Prostate.Malignant.Top.5000.Genes <- VariableFeatures(Chen.Prostate.Malignant.Seurat)
+
+
+Sharma.Liver.Malignant.Seurat <- subset(Sharma.Liver.Seurat, Consensus_Cell_Type == "Epithelial")
+Sharma.Liver.Malignant.Seurat <- FindVariableFeatures(Sharma.Liver.Malignant.Seurat,
+                                                           nfeatures = V3.Pipeline.Config$n.var.genes)
+Sharma.Liver.Malignant.Top.5000.Genes <- VariableFeatures(Sharma.Liver.Malignant.Seurat)
+
+
+Young.Kidney.Malignant.Seurat <- subset(Young.Kidney.Seurat, Consensus_Cell_Type == "Epithelial")
+Young.Kidney.Malignant.Seurat <- FindVariableFeatures(Young.Kidney.Malignant.Seurat,
+                                                           nfeatures = V3.Pipeline.Config$n.var.genes)
+Young.Kidney.Malignant.Top.5000.Genes <- VariableFeatures(Young.Kidney.Malignant.Seurat)
+
+Common.Malignant.Genes <- Reduce(intersect, list(HNSCC.Atlas.Malignant.Top.5000.Genes, Bassez.2021.Malignant.Top.5000.Genes, Chan.2021.Malignant.Top.5000.Genes, 
+                                                 Biermann.Melanoma.Malignant.Top.5000.Genes, Chen.Prostate.Malignant.Top.5000.Genes, Sharma.Liver.Malignant.Top.5000.Genes,Young.Kidney.Malignant.Top.5000.Genes ))
+
+
+```
+
+
+
+
+#scDiffComPipeline - V3 (From Scripts)
+```{r}
+
+AXL.Breast.Seurat <- readRDS("~/Thesis/CellChat/outputs/scDiffCom/Seurats/AXL_Bassez2021_Breast_grouped.rds")
+AXL.Breast.scDiffCom <- readRDS("~/Thesis/CellChat/outputs/scDiffCom/scDiffComs/AXL_Bassez2021_Breast_grouped_scDiffCom.rds")
+
+library(dplyr)
+library(tidyr) 
+library(scDiffCom)
+
+
+# 1. Convert and filter for Malignant cell interactions
+AXL.Breast.Malignant.Interactions <- as.data.frame(AXL.Breast.scDiffCom@cci_table_detected) %>%
+  filter(EMITTER_CELLTYPE == "Malignant" | RECEIVER_CELLTYPE == "Malignant")
+
+# 2. Extract unique ligands (from LIGAND_1 and LIGAND_2)
+AXL.Breast.ligands_from_malignant <- AXL.Breast.Malignant.Interactions %>%
+  filter(EMITTER_CELLTYPE == "Malignant") %>%
+  select(LIGAND_1, LIGAND_2) %>%
+  pivot_longer(cols = everything(), values_drop_na = TRUE) %>%
+  pull(value) %>%
+  unique()
+
+# 3. Extract unique receptors (from RECEPTOR_1, RECEPTOR_2, and RECEPTOR_3)
+AXL.Breast.receptors_on_malignant <- AXL.Breast.Malignant.Interactions %>%
+  filter(RECEIVER_CELLTYPE == "Malignant") %>%
+  select(RECEPTOR_1, RECEPTOR_2, RECEPTOR_3) %>%
+  pivot_longer(cols = everything(), values_drop_na = TRUE) %>%
+  pull(value) %>%
+  unique()
+
+# 4. Combine into the master list
+AXL.Breast.all_malignant_comm_genes <- c(
+  AXL.Breast.ligands_from_malignant, 
+  AXL.Breast.receptors_on_malignant
+) %>%
+  unique()
+
+Top.Genes.And.CCI.AXL.Breast <- intersect(Bassez.2021.Malignant.Top.5000.Genes, AXL.Breast.all_malignant_comm_genes)
+
+```
+

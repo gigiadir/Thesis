@@ -1,0 +1,1944 @@
+---
+title: "scDiffCom-PostAnalysis"
+output: html_document
+---
+
+# Analysis Globals & Helpers
+```{r setup, message=FALSE, warning=FALSE}
+# source("~/Thesis/CCC/scripts/utils/Utils.R")
+# source("~/Thesis/CCC/scripts/utils/my.utils.R")
+# install.packages("SuperRanker")
+source("~/Thesis/CCC/scripts/utils/Utils.R")
+
+library(tidyverse) # Loads dplyr, tidyr, ggplot2, purrr, stringr, etc.
+library(RColorBrewer)
+library(pheatmap)
+#library(dplyr)
+#library(tidyr)
+#library(purrr)
+#library(stringr)
+library(scDiffCom)
+#library(ggplot2)
+#library(ggrepel)
+library(SuperRanker)
+
+
+# BASE_RESULTS_DIR <- "~/Thesis/CCC/outputs/scDiffCom/scDiffComs/Consensus_Cell_Type"
+BASE_RESULTS_DIR <- "~/CCC-scDiffCom/results"
+# MALIGNANT_CELLTYPE <- c("Epithelial", "Malignant", "Tumor", "Cancer")
+MALIGNANT_CELLTYPE <- c("Tumor")
+USE_COSINE         <- TRUE           # TRUE → cosine distance instead of correlation
+MIN_GENES_PER_CCI  <- 2              # CCIs must appear in ≥ N genes (filters sparse rows)
+# OUTPUT_DIR         <- "~/Thesis/CCC/outputs/scDiffCom/plots/v2"            # where to save output PNGs (v2 — original, no unknown-type filter)
+OUTPUT_DIR         <- "~/Thesis/CCC/outputs/scDiffCom/plots/v4"
+dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+LRI_GO <- scDiffCom::LRI_human$LRI_curated_GO
+BP_GO_INFO <- scDiffCom::gene_ontology_level %>%
+  filter(ASPECT == "biological_process") %>%
+  select(ID, NAME)
+LRI_GO_BP <- LRI_GO %>%
+  inner_join(BP_GO_INFO, by = c("GO_ID" = "ID"))
+```
+
+
+# Analysis Utils
+```{r utils}
+load.dataset.scDiffComs <- function(dataset_name,
+                                    results_dir = BASE_RESULTS_DIR,
+                                    do_switch   = FALSE) {
+  message("Loading scDiffComs results for dataset: ", dataset_name)
+  rds_dir   <- file.path(results_dir, dataset_name)
+  rds_files <- list.files(
+    rds_dir,
+    pattern   = paste0("_", dataset_name, "_scDiffCom\\.rds$"),
+    full.names = TRUE
+  )
+
+  scDiffCom_list <- list()
+
+  for (rds_path in rds_files) {
+    fname        <- basename(rds_path)
+    gene         <- str_remove(fname, paste0("_", dataset_name, "_scDiffCom\\.rds$"))
+    message("  Loading gene: ", gene)
+    scDiffCom_obj <- readRDS(rds_path)
+    scDiffCom_list[[gene]] <- scDiffCom_obj
+  }
+
+  return(scDiffCom_list)
+}
+
+filter.scDiffCom.cci_table_detected.for.malignant <- function(scDiffCom_obj,
+                                                               malignant_celltype = MALIGNANT_CELLTYPE) {
+  scDiffCom_obj@cci_table_detected %>%
+    filter(
+      (EMITTER_CELLTYPE %in% malignant_celltype | RECEIVER_CELLTYPE %in% malignant_celltype),
+      IS_CCI_DE == TRUE,
+      is.finite(LOGFC)
+    )
+}
+
+filter.scDiffCom.cci_table_detected.for.celltypes <- function(scDiffCom_obj,
+                                                               emitter_celltype,
+                                                               receiver_celltype) {
+  scDiffCom_obj@cci_table_detected %>%
+    filter(
+      EMITTER_CELLTYPE == emitter_celltype,
+      RECEIVER_CELLTYPE == receiver_celltype,
+      IS_CCI_DE == TRUE,
+      is.finite(LOGFC)
+    )
+}
+```
+
+
+# Load Data
+```{r load-data}
+# _step4 datasets: conditions are correctly oriented — do_switch = FALSE (default)
+
+# ── Breast ────────────────────────────────────────────────────────────────────
+# Bassez2021_Breast_step4.scDiffComs <- load.dataset.scDiffComs("Bassez2021_Breast_step4")
+# Qian2020_Breast_step4.scDiffComs   <- load.dataset.scDiffComs("Qian2020_Breast_step4")
+# Wu2021_Breast_step4.scDiffComs     <- load.dataset.scDiffComs("Wu2021_Breast_step4")
+# 
+# Bassez2021_Breast_step4.malignant <- lapply(
+#   Bassez2021_Breast_step4.scDiffComs,
+#   filter.scDiffCom.cci_table_detected.for.malignant
+# )
+# Qian2020_Breast_step4.malignant <- lapply(
+#   Qian2020_Breast_step4.scDiffComs,
+#   filter.scDiffCom.cci_table_detected.for.malignant
+# )
+# Wu2021_Breast_step4.malignant <- lapply(
+#   Wu2021_Breast_step4.scDiffComs,
+#   filter.scDiffCom.cci_table_detected.for.malignant
+# )
+# 
+# my.save.RData("Bassez2021_Breast_step4.malignant", "~/Thesis/CCC/outputs/scDiffCom/RData_objects", is.load.obj = T)
+# my.save.RData("Qian2020_Breast_step4.malignant", "~/Thesis/CCC/outputs/scDiffCom/RData_objects", is.load.obj = T)
+# my.save.RData("Wu2021_Breast_step4.malignant", "~/Thesis/CCC/outputs/scDiffCom/RData_objects", is.load.obj = T)
+
+
+# ── Lung ──────────────────────────────────────────────────────────────────────
+# Chan2021_Lung_step4.scDiffComs     <- load.dataset.scDiffComs("Chan2021_Lung_step4")
+# Laughney2020_Lung_step4.scDiffComs <- load.dataset.scDiffComs("Laughney2020_Lung_step4")
+# Xing2021_Lung_step4.scDiffComs     <- load.dataset.scDiffComs("Xing2021_Lung_step4")
+#
+# Chan2021_Lung_step4.malignant <- lapply(
+#   Chan2021_Lung_step4.scDiffComs,
+#   filter.scDiffCom.cci_table_detected.for.malignant
+# )
+# Laughney2020_Lung_step4.malignant <- lapply(
+#   Laughney2020_Lung_step4.scDiffComs,
+#   filter.scDiffCom.cci_table_detected.for.malignant
+# )
+# Xing2021_Lung_step4.malignant <- lapply(
+#   Xing2021_Lung_step4.scDiffComs,
+#   filter.scDiffCom.cci_table_detected.for.malignant
+# )
+
+# ── Head & Neck (HNSC) ────────────────────────────────────────────────────────
+Kurten_HNSC.scDiffComs <- load.dataset.scDiffComs("Kurten_HNSC")
+Puram_HNSC.scDiffComs  <- load.dataset.scDiffComs("Puram_HNSC")
+Choi_HNSC.scDiffComs   <- load.dataset.scDiffComs("Choi_HNSC")
+Bill_HNSC.scDiffComs   <- load.dataset.scDiffComs("Bill_HNSC")
+
+Kurten_HNSC.malignant <- lapply(
+  Kurten_HNSC.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.malignant
+)
+Puram_HNSC.malignant <- lapply(
+  Puram_HNSC.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.malignant
+)
+Choi_HNSC.malignant <- lapply(
+  Choi_HNSC.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.malignant
+)
+Bill_HNSC.malignant <- lapply(
+  Bill_HNSC.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.malignant
+)
+
+my.save.RData("Kurten_HNSC.malignant", "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+my.save.RData("Puram_HNSC.malignant",  "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+my.save.RData("Choi_HNSC.malignant",   "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+my.save.RData("Bill_HNSC.malignant",   "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+
+```
+
+
+
+## Filter Unknown Cell Types + Non-Common Genes
+```{r filter-unknown-celltypes}
+# Remove interactions where EMITTER or RECEIVER cell type matches "unknown", "other",
+# or "equivocal" (case-insensitive). Original .malignant lists are preserved with
+# an .orig suffix so the unfiltered data remain accessible in the session.
+
+is_unknown_celltype <- function(ct) {
+  grepl("unknown|other|equivocal", ct, ignore.case = TRUE)
+}
+
+filter_unknown_celltypes <- function(cci_df) {
+  cci_df %>%
+    filter(
+      !is_unknown_celltype(EMITTER_CELLTYPE),
+      !is_unknown_celltype(RECEIVER_CELLTYPE)
+    )
+}
+
+# Preserve originals
+# Bassez2021_Breast_step4.malignant.orig   <- Bassez2021_Breast_step4.malignant
+# Qian2020_Breast_step4.malignant.orig     <- Qian2020_Breast_step4.malignant
+# Wu2021_Breast_step4.malignant.orig       <- Wu2021_Breast_step4.malignant
+# Chan2021_Lung_step4.malignant.orig       <- Chan2021_Lung_step4.malignant
+# Laughney2020_Lung_step4.malignant.orig   <- Laughney2020_Lung_step4.malignant
+# Xing2021_Lung_step4.malignant.orig       <- Xing2021_Lung_step4.malignant
+Kurten_HNSC.malignant.orig <- Kurten_HNSC.malignant
+Puram_HNSC.malignant.orig  <- Puram_HNSC.malignant
+Choi_HNSC.malignant.orig   <- Choi_HNSC.malignant
+Bill_HNSC.malignant.orig   <- Bill_HNSC.malignant
+
+# Overwrite .malignant lists — all downstream chunks pick up the filtered data
+Bassez2021_Breast_step4.malignant   <- lapply(Bassez2021_Breast_step4.malignant.orig,   filter_unknown_celltypes)
+Qian2020_Breast_step4.malignant     <- lapply(Qian2020_Breast_step4.malignant.orig,     filter_unknown_celltypes)
+Wu2021_Breast_step4.malignant       <- lapply(Wu2021_Breast_step4.malignant.orig,       filter_unknown_celltypes)
+# Chan2021_Lung_step4.malignant       <- lapply(Chan2021_Lung_step4.malignant.orig,       filter_unknown_celltypes)
+# Laughney2020_Lung_step4.malignant   <- lapply(Laughney2020_Lung_step4.malignant.orig,   filter_unknown_celltypes)
+# Xing2021_Lung_step4.malignant       <- lapply(Xing2021_Lung_step4.malignant.orig,       filter_unknown_celltypes)
+Kurten_HNSC.malignant <- lapply(Kurten_HNSC.malignant.orig, filter_unknown_celltypes)
+Puram_HNSC.malignant  <- lapply(Puram_HNSC.malignant.orig,  filter_unknown_celltypes)
+Choi_HNSC.malignant   <- lapply(Choi_HNSC.malignant.orig,   filter_unknown_celltypes)
+Bill_HNSC.malignant   <- lapply(Bill_HNSC.malignant.orig,   filter_unknown_celltypes)
+
+# For breast datasets - keep only genes present in all datasets, then select
+# the top 100 by mean CCI count (computed once, applied identically to all objects)
+Common.Breast.Malignant.Genes <- Reduce(intersect, list(
+  names(Bassez2021_Breast_step4.malignant),
+  names(Qian2020_Breast_step4.malignant),
+  names(Wu2021_Breast_step4.malignant)
+))
+
+TOP_N_FILTER_GENES <- 100
+
+Original.Genes.List <- unique(c(
+  c("CDH1", "CDH2", "CDH11", "CTNNB1", "VWF", "COL1A1", "COL1A2", "VEGFA", "IGF1", "IGF2", "CSF1", "CSF1R"),
+  c("AXL", "ERBB2", "EGFR", "HLA-A", "HLA-B", "HLA-C", "ESR1", "MKI67", "GATA3", "CTLA4")
+  ))
+
+rest <- head(intersect(setdiff(Complexes.Oncogenes.OncoKB, gene_list), Common.Breast.Malignant.Genes), TOP_N_FILTER_GENES - length(Original.Genes.List))
+Top.N.Genes <- c(Original.Genes.List, rest)
+
+message("Shared gene filter: ", length(Top.N.Genes),
+        " genes selected (top by mean CCI count across all breast datasets).")
+
+Bassez2021_Breast_step4.malignant <- Bassez2021_Breast_step4.malignant[Top.N.Genes]
+Qian2020_Breast_step4.malignant   <- Qian2020_Breast_step4.malignant[Top.N.Genes]
+Wu2021_Breast_step4.malignant     <- Wu2021_Breast_step4.malignant[Top.N.Genes]
+
+# For H&N datasets - keep only genes present in all four H&N datasets, then select
+# the same top 100 gene list (anchored on Original.Genes.List + oncogene supplement)
+Common.HN.Malignant.Genes <- Reduce(intersect, list(
+  names(Kurten_HNSC.malignant),
+  names(Puram_HNSC.malignant),
+  names(Choi_HNSC.malignant),
+  names(Bill_HNSC.malignant)
+))
+
+rest.HN <- head(intersect(setdiff(Complexes.Oncogenes.OncoKB, gene_list), Common.HN.Malignant.Genes),
+                TOP_N_FILTER_GENES - length(Original.Genes.List))
+Top.N.HN.Genes <- Common.HN.Malignant.Genes
+
+message("H&N shared gene filter: ", length(Top.N.HN.Genes),
+        " genes selected (top by mean CCI count across all H&N datasets).")
+
+Kurten_HNSC.malignant <- Kurten_HNSC.malignant[Top.N.HN.Genes]
+Puram_HNSC.malignant  <- Puram_HNSC.malignant[Top.N.HN.Genes]
+Choi_HNSC.malignant   <- Choi_HNSC.malignant[Top.N.HN.Genes]
+Bill_HNSC.malignant   <- Bill_HNSC.malignant[Top.N.HN.Genes]
+
+report_filter <- function(orig, filt, label) {
+  n_orig <- sum(sapply(orig, nrow))
+  n_filt <- sum(sapply(filt, nrow))
+  message(sprintf("  %-35s  %d → %d rows (removed %d)", label, n_orig, n_filt, n_orig - n_filt))
+}
+message("Unknown-celltype filter applied:")
+report_filter(Bassez2021_Breast_step4.malignant.orig,  Bassez2021_Breast_step4.malignant,  "Bassez2021_Breast_step4")
+report_filter(Qian2020_Breast_step4.malignant.orig,    Qian2020_Breast_step4.malignant,    "Qian2020_Breast_step4")
+report_filter(Wu2021_Breast_step4.malignant.orig,      Wu2021_Breast_step4.malignant,      "Wu2021_Breast_step4")
+# report_filter(Chan2021_Lung_step4.malignant.orig,      Chan2021_Lung_step4.malignant,      "Chan2021_Lung_step4")
+# report_filter(Laughney2020_Lung_step4.malignant.orig,  Laughney2020_Lung_step4.malignant,  "Laughney2020_Lung_step4")
+# report_filter(Xing2021_Lung_step4.malignant.orig,      Xing2021_Lung_step4.malignant,      "Xing2021_Lung_step4")
+report_filter(Kurten_HNSC.malignant.orig, Kurten_HNSC.malignant, "Kurten_HNSC")
+report_filter(Puram_HNSC.malignant.orig,  Puram_HNSC.malignant,  "Puram_HNSC")
+report_filter(Choi_HNSC.malignant.orig,   Choi_HNSC.malignant,   "Choi_HNSC")
+report_filter(Bill_HNSC.malignant.orig,   Bill_HNSC.malignant,   "Bill_HNSC")
+```
+
+
+
+
+
+# Data Quality Checks
+```{r celltype-noise-diagnostics}
+# Uses .malignant.orig (all interactions, before unknown-celltype removal)
+# to quantify how much "other/unknown/equivocal" noise each dataset contains.
+OUTPUT_DIR         <- "~/Thesis/CCC/outputs/scDiffCom/plots/v2/qualityCheck"
+
+# ── Local dataset metadata ────────────────────────────────────────────────────
+noise_ds_meta <- data.frame(
+  ds_full     = c("Bassez2021_Breast_step4", "Qian2020_Breast_step4",
+                  "Wu2021_Breast_step4",     "Chan2021_Lung_step4",
+                  "Laughney2020_Lung_step4", "Xing2021_Lung_step4",
+                  "Kurten_HNSC", "Puram_HNSC", "Choi_HNSC", "Bill_HNSC"),
+  ds_short    = c("Bassez2021", "Qian2020", "Wu2021",
+                  "Chan2021",   "Laughney2020", "Xing2021",
+                  "Kurten", "Puram", "Choi", "Bill"),
+  Cancer_Type = c("Breast", "Breast", "Breast", "Lung", "Lung", "Lung",
+                  "H&N", "H&N", "H&N", "H&N"),
+  stringsAsFactors = FALSE
+)
+
+malignant_orig_catalog <- list(
+  # Bassez2021_Breast_step4   = Bassez2021_Breast_step4.malignant.orig,
+  # Qian2020_Breast_step4     = Qian2020_Breast_step4.malignant.orig,
+  # Wu2021_Breast_step4       = Wu2021_Breast_step4.malignant.orig,
+  # Chan2021_Lung_step4       = Chan2021_Lung_step4.malignant.orig,
+  # Laughney2020_Lung_step4   = Laughney2020_Lung_step4.malignant.orig,
+  # Xing2021_Lung_step4       = Xing2021_Lung_step4.malignant.orig,
+  Kurten_HNSC               = Kurten_HNSC.malignant.orig,
+  Puram_HNSC                = Puram_HNSC.malignant.orig,
+  Choi_HNSC                 = Choi_HNSC.malignant.orig,
+  Bill_HNSC                 = Bill_HNSC.malignant.orig
+)
+
+# ── Count interactions per gene per dataset ───────────────────────────────────
+noise_counts_gene <- purrr::imap_dfr(malignant_orig_catalog, function(gene_list, ds_full) {
+  purrr::imap_dfr(gene_list, function(df, gene) {
+    if (nrow(df) == 0) return(NULL)
+    n_other <- sum(is_unknown_celltype(df$EMITTER_CELLTYPE) |
+                   is_unknown_celltype(df$RECEIVER_CELLTYPE))
+    data.frame(Dataset = ds_full, Gene = gene,
+               Clean = nrow(df) - n_other, Contains_Other = n_other,
+               stringsAsFactors = FALSE)
+  })
+})
+
+# ── Aggregate to dataset level ─────────────────────────────────────────────────
+noise_counts <- noise_counts_gene %>%
+  group_by(Dataset) %>%
+  summarise(Clean = sum(Clean), Contains_Other = sum(Contains_Other), .groups = "drop")
+
+# ── Summary table ─────────────────────────────────────────────────────────────
+table_celltype_noise_stats <- noise_counts %>%
+  left_join(noise_ds_meta, by = c("Dataset" = "ds_full")) %>%
+  mutate(
+    Total_Interactions       = Clean + Contains_Other,
+    Other_Interactions_Count = Contains_Other,
+    Clean_Interactions_Count = Clean,
+    Percent_Noise            = round(100 * Contains_Other / Total_Interactions, 2)
+  ) %>%
+  select(Dataset, Cancer_Type, Total_Interactions,
+         Other_Interactions_Count, Clean_Interactions_Count, Percent_Noise) %>%
+  arrange(Cancer_Type, Dataset)
+
+print(table_celltype_noise_stats)
+View(table_celltype_noise_stats)
+
+# ── Per-gene summary table ─────────────────────────────────────────────────────
+table_celltype_noise_gene_stats <- noise_counts_gene %>%
+  left_join(noise_ds_meta, by = c("Dataset" = "ds_full")) %>%
+  mutate(
+    Total_Interactions       = Clean + Contains_Other,
+    Other_Interactions_Count = Contains_Other,
+    Clean_Interactions_Count = Clean,
+    Percent_Noise            = round(100 * Contains_Other / Total_Interactions, 2)
+  ) %>%
+  select(Dataset, Cancer_Type, Gene, Total_Interactions,
+         Other_Interactions_Count, Clean_Interactions_Count, Percent_Noise) %>%
+  arrange(Cancer_Type, Dataset, Gene)
+
+print(table_celltype_noise_gene_stats)
+View(table_celltype_noise_gene_stats)
+
+# ── Long format for plotting ───────────────────────────────────────────────────
+noise_long <- noise_counts %>%
+  left_join(noise_ds_meta, by = c("Dataset" = "ds_full")) %>%
+  pivot_longer(c(Clean, Contains_Other),
+               names_to = "Category", values_to = "Count") %>%
+  mutate(
+    Category = factor(
+      dplyr::recode(Category, Contains_Other = "Contains Other"),
+      levels = c("Clean", "Contains Other")
+    ),
+    ds_short = factor(ds_short, levels = noise_ds_meta$ds_short)
+  )
+
+# ── Plot aesthetics ────────────────────────────────────────────────────────────
+fill_palette <- c("Clean" = "#4DAF4A", "Contains Other" = "#E41A1C")
+# X-axis label colours follow cancer type: Breast = red, Lung = blue, H&N = darkgreen
+x_label_cols <- dplyr::case_when(
+  noise_ds_meta$Cancer_Type == "Breast" ~ "#E41A1C",
+  noise_ds_meta$Cancer_Type == "Lung"   ~ "#377EB8",
+  noise_ds_meta$Cancer_Type == "H&N"    ~ "#33A02C",
+  TRUE ~ "black"
+)
+
+# ── Plot 1: Absolute counts ────────────────────────────────────────────────────
+p_noise_counts <- ggplot(noise_long,
+                         aes(x = ds_short, y = Count, fill = Category)) +
+  geom_col(position = "stack", width = 0.7) +
+  scale_fill_manual(values = fill_palette) +
+  scale_y_continuous(labels = scales::comma) +
+  theme_classic(base_size = 13) +
+  theme(
+    axis.text.x     = element_text(angle = 45, hjust = 1, colour = x_label_cols),
+    legend.position = "right"
+  ) +
+  labs(
+    title    = "Celltype Noise in Malignant Interaction Pool",
+    subtitle = "X-axis labels: red = Breast, blue = Lung, green = H&N",
+    x = NULL, y = "Number of Interactions", fill = "Category"
+  )
+
+print(p_noise_counts)
+ggsave(file.path(OUTPUT_DIR, "celltype_noise_counts.png"),
+       plot = p_noise_counts, width = 9, height = 6, dpi = 300)
+message("Saved celltype_noise_counts.png")
+
+# ── Plot 2: Proportions ────────────────────────────────────────────────────────
+p_noise_props <- ggplot(noise_long,
+                        aes(x = ds_short, y = Count, fill = Category)) +
+  geom_col(position = "fill", width = 0.7) +
+  scale_fill_manual(values = fill_palette) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_classic(base_size = 13) +
+  theme(
+    axis.text.x     = element_text(angle = 45, hjust = 1, colour = x_label_cols),
+    legend.position = "right"
+  ) +
+  labs(
+    title    = "Proportion of Celltype Noise in Malignant Interaction Pool",
+    subtitle = "X-axis labels: red = Breast, blue = Lung, green = H&N",
+    x = NULL, y = "Proportion of Interactions", fill = "Category"
+  )
+
+print(p_noise_props)
+ggsave(file.path(OUTPUT_DIR, "celltype_noise_proportions.png"),
+       plot = p_noise_props, width = 9, height = 6, dpi = 300)
+message("Saved celltype_noise_proportions.png")
+
+# ── Plot 3: Per-gene % noise heatmap (Gene × Dataset) ─────────────────────────
+noise_gene_tile <- noise_counts_gene %>%
+  left_join(noise_ds_meta, by = c("Dataset" = "ds_full")) %>%
+  mutate(
+    Percent_Noise = 100 * Contains_Other / (Clean + Contains_Other),
+    ds_short      = factor(ds_short, levels = noise_ds_meta$ds_short)
+  )
+
+n_genes_tile <- length(unique(noise_gene_tile$Gene))
+
+p_gene_heatmap <- ggplot(noise_gene_tile,
+                         aes(x = ds_short, y = Gene, fill = Percent_Noise)) +
+  geom_tile(colour = "white", linewidth = 0.3) +
+  scale_fill_gradient2(
+    low = "#4DAF4A", mid = "#ffffbf", high = "#E41A1C",
+    midpoint = 50, limits = c(0, 100), name = "% Noise"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, colour = x_label_cols),
+    axis.text.y = element_text(size = max(4, 180 / n_genes_tile))
+  ) +
+  labs(
+    title    = "Celltype Noise per Gene per Dataset",
+    subtitle = "Color = % interactions containing 'other/unknown/equivocal' cell type\nX-axis labels: red = Breast, blue = Lung, green = H&N",
+    x = NULL, y = "Gene"
+  )
+
+print(p_gene_heatmap)
+ggsave(file.path(OUTPUT_DIR, "celltype_noise_gene_heatmap.png"),
+       plot = p_gene_heatmap,
+       width  = 9,
+       height = max(6, n_genes_tile * 0.25),
+       dpi    = 300)
+message("Saved celltype_noise_gene_heatmap.png")
+```
+
+
+## Quality Check — Cell-Type Interaction Distributions
+```{r qc-celltype-distributions, message=FALSE, warning=FALSE}
+library(ggalluvial)
+
+# ── 1. Data Preparation ───────────────────────────────────────────────────────
+# Flatten malignant_orig_catalog (list of datasets → list of genes → data frames)
+# into one tidy data frame: Dataset | Gene | EMITTER | RECEIVER
+qc_interactions <- purrr::imap_dfr(malignant_orig_catalog, function(gene_list, ds_full) {
+  ds_short <- noise_ds_meta$ds_short[noise_ds_meta$ds_full == ds_full]
+  purrr::imap_dfr(gene_list, function(df, gene) {
+    if (is.null(df) || nrow(df) == 0) return(NULL)
+    data.frame(
+      Dataset  = ds_short,
+      Gene     = gene,
+      EMITTER  = df$EMITTER_CELLTYPE,
+      RECEIVER = df$RECEIVER_CELLTYPE,
+      stringsAsFactors = FALSE
+    )
+  })
+})
+
+# Dataset factor ordered as in noise_ds_meta
+qc_interactions$Dataset <- factor(qc_interactions$Dataset,
+                                  levels = noise_ds_meta$ds_short)
+
+# Aggregate: count interactions per Dataset × EMITTER × RECEIVER
+qc_counts <- qc_interactions %>%
+  count(Dataset, EMITTER, RECEIVER, name = "n_interactions")
+
+# Consistent cell-type order (most active first) for both axes
+ct_order <- qc_interactions %>%
+  count(EMITTER, name = "n") %>%
+  arrange(desc(n)) %>%
+  pull(EMITTER) %>%
+  unique()
+
+qc_counts <- qc_counts %>%
+  mutate(
+    EMITTER  = factor(EMITTER,  levels = rev(ct_order)),  # y-axis: top = most active
+    RECEIVER = factor(RECEIVER, levels = ct_order)
+  )
+
+message("QC data prepared: ", nrow(qc_counts),
+        " Dataset × EMITTER × RECEIVER combinations")
+
+# ── 2. Faceted Heatmap ────────────────────────────────────────────────────────
+p_qc_heatmap <- ggplot(qc_counts,
+                       aes(x = RECEIVER, y = EMITTER, fill = n_interactions)) +
+  geom_tile(colour = "white", linewidth = 0.3) +
+  scale_fill_gradient(low = "#ccd9ff", high = "#08306b",
+                      name = "# interactions",
+                      labels = scales::comma) +
+  facet_wrap(~ Dataset, ncol = 3) +
+  theme_classic(base_size = 10) +
+  theme(
+    axis.text.x      = element_text(angle = 45, hjust = 1, size = 7),
+    axis.text.y      = element_text(size = 7),
+    strip.background = element_rect(fill = "#e8e8e8", colour = NA),
+    strip.text       = element_text(face = "bold"),
+    panel.spacing    = unit(0.5, "lines")
+  ) +
+  labs(
+    title    = "Cell-Type Interaction Counts per Dataset (unfiltered)",
+    subtitle = "'Other/Unknown/Equivocal' cell types included — rows = Emitter, cols = Receiver",
+    x = "Receiver Cell Type", y = "Emitter Cell Type"
+  )
+
+print(p_qc_heatmap)
+ggsave(file.path(OUTPUT_DIR, "qc_celltype_heatmap.png"),
+       plot = p_qc_heatmap, width = 18, height = 10, dpi = 300)
+message("Saved qc_celltype_heatmap.png")
+
+# ── 3. Sankey / Alluvial Diagram (aggregated across all datasets) ─────────────
+TOP_PAIRS_SANKEY <- 20   # keep top N Emitter→Receiver pairs
+
+qc_alluvial_data <- qc_interactions %>%
+  count(EMITTER, RECEIVER, name = "n_interactions") %>%
+  arrange(desc(n_interactions)) %>%
+  slice_head(n = TOP_PAIRS_SANKEY)
+
+# sqrt(n) transform: compresses Epithelial's dominant band while keeping
+# smaller categories (Hematopoietic, Myeloid, …) visually distinct.
+p_qc_sankey <- ggplot(
+  qc_alluvial_data,
+  aes(axis1 = EMITTER, axis2 = RECEIVER, y = sqrt(n_interactions))
+) +
+  # Sigmoid curves look cleaner than the default splines
+  geom_alluvium(aes(fill = EMITTER), width = 1/10, alpha = 0.65,
+                curve_type = "sigmoid") +
+  geom_stratum(width = 1/4, fill = "grey92", colour = "grey55",
+               linewidth = 0.4) +
+  # hjust = "outward" floats every label outside its stratum box so labels
+  # for small categories don't collide with the flows or each other.
+  geom_text(
+    stat     = "stratum",
+    aes(label = after_stat(stratum)),
+    hjust    = "outward",
+    size     = 3.2,
+    fontface = "bold"
+  ) +
+  scale_x_discrete(
+    limits = c("Emitter", "Receiver"),
+    expand = c(0.35, 0.35)   # extra horizontal room for outward labels
+  ) +
+  theme_void(base_size = 13) +
+  theme(
+    axis.text.x     = element_text(face = "bold", size = 13,
+                                   margin = margin(b = 6)),
+    plot.title      = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle   = element_text(size = 10, colour = "grey40", hjust = 0.5),
+    plot.margin     = margin(12, 40, 12, 40),
+    legend.position = "none"
+  ) +
+  labs(
+    title    = sprintf(
+      "Cell-Type Interaction Flow — Top %d Emitter→Receiver Pairs (All Datasets)",
+      TOP_PAIRS_SANKEY)  )
+
+print(p_qc_sankey)
+ggsave(file.path(OUTPUT_DIR, "qc_celltype_sankey.png"),
+       plot = p_qc_sankey, width = 14, height = 9, dpi = 300)
+message("Saved qc_celltype_sankey.png")
+
+# ── 4. Top-10 Summary Table ───────────────────────────────────────────────────
+qc_top10 <- qc_interactions %>%
+  mutate(ER_CELLTYPES = paste0(EMITTER, "_", RECEIVER)) %>%
+  count(ER_CELLTYPES, EMITTER, RECEIVER, name = "n_interactions") %>%
+  arrange(desc(n_interactions)) %>%
+  slice_head(n = 10)
+
+message("\nTop 10 most frequent Emitter→Receiver pairs (across all datasets):")
+print(qc_top10)
+View(qc_top10)
+```
+
+
+
+
+
+
+
+
+# Shared Config, Helpers & CCI Set Construction
+```{r cci-sets}
+# ── GLOBAL CONFIG ─────────────────────────────────────────────────────────────
+TOP_N_CCI    <- 500        # top CCIs per gene per dataset (ranked by |LOGFC|) — used by Jaccard
+GENE_OF_INT  <- "AXL"   # gene for the 6×6 case-study heatmap
+SEED         <- 42
+
+DATASET_LABELS <- c(
+  "Bassez2021_Breast_step4",
+  "Qian2020_Breast_step4",
+  "Wu2021_Breast_step4",
+  "Chan2021_Lung_step4",
+  "Laughney2020_Lung_step4",
+  "Xing2021_Lung_step4",
+  "Kurten_HNSC",
+  "Puram_HNSC",
+  "Choi_HNSC",
+  "Bill_HNSC"
+)
+
+# ── DATASET METADATA MAPS ─────────────────────────────────────────────────────
+# Short display names (used as point labels / row IDs in UMAP)
+ds_short_map <- c(
+  Bassez2021_Breast_step4   = "Bassez2021",
+  Qian2020_Breast_step4     = "Qian2020",
+  Wu2021_Breast_step4       = "Wu2021",
+  Chan2021_Lung_step4       = "Chan2021",
+  Laughney2020_Lung_step4   = "Laughney2020",
+  Xing2021_Lung_step4       = "Xing2021",
+  Kurten_HNSC               = "Kurten",
+  Puram_HNSC                = "Puram",
+  Choi_HNSC                 = "Choi",
+  Bill_HNSC                 = "Bill"
+)
+
+# Cancer type per dataset (used for UMAP shape aesthetic)
+ds_cancer_map <- c(
+  Bassez2021_Breast_step4   = "Breast",
+  Qian2020_Breast_step4     = "Breast",
+  Wu2021_Breast_step4       = "Breast",
+  Chan2021_Lung_step4       = "Lung",
+  Laughney2020_Lung_step4   = "Lung",
+  Xing2021_Lung_step4       = "Lung",
+  Kurten_HNSC               = "H&N",
+  Puram_HNSC                = "H&N",
+  Choi_HNSC                 = "H&N",
+  Bill_HNSC                 = "H&N"
+)
+
+# ── PLOT AESTHETICS ───────────────────────────────────────────────────────────
+# Colours per source dataset (UMAP) and shapes per cancer type
+source_colors <- c(
+  Bassez2021   = "#E41A1C",
+  Qian2020     = "#FF7F00",
+  Wu2021       = "#4DAF4A",
+  Chan2021     = "#377EB8",
+  Laughney2020 = "#984EA3",
+  Xing2021     = "#A65628",
+  Kurten       = "#F781BF",
+  Puram        = "#999999",
+  Choi         = "#66C2A5",
+  Bill         = "#FC8D62"
+)
+cancer_shapes <- c(Breast = 16, Lung = 17, `H&N` = 15)  # circle, triangle, square
+
+# ── HELPER FUNCTIONS ──────────────────────────────────────────────────────────
+
+# build_gene_cci_sets: for each gene in a .malignant list, return CCIs ranked by
+# |LOGFC|. top_n = NULL returns all interactions (used by Average Overlap); an
+# integer truncates to the top-N (used by Jaccard).
+build_gene_cci_sets <- function(malignant_list, top_n = TOP_N_CCI) {
+  map(malignant_list, function(df) {
+    df <- df %>%
+      as.data.frame() %>%
+      arrange(-abs(LOGFC))
+    if (!is.null(top_n)) df <- slice_head(df, n = top_n)
+    pull(df, CCI) %>% unique()
+  })
+}
+
+# jaccard_dist: scalar Jaccard distance between two character-vector CCI sets.
+jaccard_dist <- function(set_a, set_b) {
+  inter <- length(intersect(set_a, set_b))
+  union <- length(union(set_a, set_b))
+  if (union == 0) return(NA_real_)
+  1 - inter / union
+}
+
+# build_gene_dataset_jaccard: N×N Jaccard distance matrix + pairwise CCI intersections
+# for one gene across N datasets.
+# Returns a list:
+#   $dist_mat      — N×N numeric Jaccard distance matrix
+#   $intersections — N×N list-matrix of shared CCI character vectors (diagonal = own CCIs)
+build_gene_dataset_jaccard <- function(gene, all_sets, labels = DATASET_LABELS) {
+  sets    <- map(all_sets, function(ds_sets) ds_sets[[gene]])
+  present <- map_lgl(sets, Negate(is.null))
+  if (!all(present)) {
+    warning(sprintf("Gene '%s' absent in: %s",
+                    gene, paste(labels[!present], collapse = ", ")))
+  }
+  n            <- length(labels)
+  dist_mat     <- matrix(NA_real_, nrow = n, ncol = n, dimnames = list(labels, labels))
+  intersections <- matrix(vector("list", n * n), nrow = n, ncol = n,
+                          dimnames = list(labels, labels))
+  for (i in seq_len(n)) for (j in seq_len(n)) {
+    if (i == j) {
+      dist_mat[i, j]      <- NA_real_
+      intersections[[i, j]] <- sets[[i]]
+    } else if (!is.null(sets[[i]]) && !is.null(sets[[j]])) {
+      dist_mat[i, j]      <- jaccard_dist(sets[[i]], sets[[j]])
+      intersections[[i, j]] <- intersect(sets[[i]], sets[[j]])
+    }
+  }
+  list(dist_mat = dist_mat, intersections = intersections)
+}
+
+
+# pad_list / dist_fun_superranker_overlap: Average Overlap distance helpers.
+# pad_list fills a ranked list to target_len with unique placeholder tokens so
+# that SuperRanker::average_overlap receives two same-length rank matrices.
+pad_list <- function(lst, target_len) {
+  if (length(lst) < target_len) {
+    padding <- paste0("MISSING_", seq_len(target_len - length(lst)), "__")
+    return(c(lst, padding))
+  }
+  return(lst[1:target_len])
+}
+
+dist_fun_superranker_overlap <- function(list1, list2, k = NULL) {
+  if (is.null(k)) k <- max(length(list1), length(list2))
+  list1     <- pad_list(list1, k)
+  list2     <- pad_list(list2, k)
+  all_items <- unique(c(list1, list2))
+  ranks1    <- match(all_items, list1);  ranks1[is.na(ranks1)] <- k + 1
+  ranks2    <- match(all_items, list2);  ranks2[is.na(ranks2)] <- k + 1
+  rank_matrix    <- cbind(ranks1, ranks2)
+  overlap_values <- SuperRanker::average_overlap(rank_matrix)
+  similarity     <- mean(overlap_values[1:min(k, length(overlap_values))], na.rm = TRUE)
+  1 - similarity
+}
+
+# build_gene_dataset_ao: N×N Average Overlap distance matrix for one gene across
+# N datasets. Uses full ranked CCI lists (no top-N truncation).
+build_gene_dataset_ao <- function(gene, all_ranked_sets, labels = DATASET_LABELS) {
+  sets    <- map(all_ranked_sets, function(ds_sets) ds_sets[[gene]])
+  present <- map_lgl(sets, Negate(is.null))
+  if (!all(present)) {
+    warning(sprintf("Gene '%s' absent in: %s",
+                    gene, paste(labels[!present], collapse = ", ")))
+  }
+  n        <- length(labels)
+  dist_mat <- matrix(NA_real_, nrow = n, ncol = n, dimnames = list(labels, labels))
+  for (i in seq_len(n)) for (j in seq_len(n)) {
+    if (i == j) {
+      dist_mat[i, j] <- NA_real_
+    } else if (!is.null(sets[[i]]) && !is.null(sets[[j]])) {
+      dist_mat[i, j] <- dist_fun_superranker_overlap(sets[[i]], sets[[j]])
+    }
+  }
+  dist_mat
+}
+
+# ── BUILD PER-DATASET CCI SETS ────────────────────────────────────────────────
+Bassez_top_cci_sets   <- build_gene_cci_sets(Bassez2021_Breast_step4.malignant,   top_n = TOP_N_CCI)
+Qian_top_cci_sets     <- build_gene_cci_sets(Qian2020_Breast_step4.malignant,     top_n = TOP_N_CCI)
+Wu_top_cci_sets       <- build_gene_cci_sets(Wu2021_Breast_step4.malignant,       top_n = TOP_N_CCI)
+Chan_top_cci_sets     <- build_gene_cci_sets(Chan2021_Lung_step4.malignant,       top_n = TOP_N_CCI)
+Laughney_top_cci_sets <- build_gene_cci_sets(Laughney2020_Lung_step4.malignant,   top_n = TOP_N_CCI)
+Xing_top_cci_sets     <- build_gene_cci_sets(Xing2021_Lung_step4.malignant,       top_n = TOP_N_CCI)
+Kurten_top_cci_sets   <- build_gene_cci_sets(Kurten_HNSC.malignant,               top_n = TOP_N_CCI)
+Puram_top_cci_sets    <- build_gene_cci_sets(Puram_HNSC.malignant,                top_n = TOP_N_CCI)
+Choi_top_cci_sets     <- build_gene_cci_sets(Choi_HNSC.malignant,                 top_n = TOP_N_CCI)
+Bill_top_cci_sets     <- build_gene_cci_sets(Bill_HNSC.malignant,                 top_n = TOP_N_CCI)
+
+message("Genes in Bassez:   ", length(Bassez_top_cci_sets))
+message("Genes in Qian:     ", length(Qian_top_cci_sets))
+message("Genes in Wu:       ", length(Wu_top_cci_sets))
+message("Genes in Chan:     ", length(Chan_top_cci_sets))
+message("Genes in Laughney: ", length(Laughney_top_cci_sets))
+message("Genes in Xing:     ", length(Xing_top_cci_sets))
+message("Genes in Kurten:   ", length(Kurten_top_cci_sets))
+message("Genes in Puram:    ", length(Puram_top_cci_sets))
+message("Genes in Choi:     ", length(Choi_top_cci_sets))
+message("Genes in Bill:     ", length(Bill_top_cci_sets))
+
+# ── COMBINED CCI SET LIST (used by all downstream chunks) ─────────────────────
+all_top_cci_sets <- list(
+  Bassez2021_Breast_step4   = Bassez_top_cci_sets,
+  Qian2020_Breast_step4     = Qian_top_cci_sets,
+  Wu2021_Breast_step4       = Wu_top_cci_sets,
+  Chan2021_Lung_step4       = Chan_top_cci_sets,
+  Laughney2020_Lung_step4   = Laughney_top_cci_sets,
+  Xing2021_Lung_step4       = Xing_top_cci_sets,
+  Kurten_HNSC               = Kurten_top_cci_sets,
+  Puram_HNSC                = Puram_top_cci_sets,
+  Choi_HNSC                 = Choi_top_cci_sets,
+  Bill_HNSC                 = Bill_top_cci_sets
+)
+
+# ── RANKED CCI SETS (full list, no truncation — used by Average Overlap) ─────
+Bassez_cci_sets_ranked   <- build_gene_cci_sets(Bassez2021_Breast_step4.malignant,   top_n = NULL)
+Qian_cci_sets_ranked     <- build_gene_cci_sets(Qian2020_Breast_step4.malignant,     top_n = NULL)
+Wu_cci_sets_ranked       <- build_gene_cci_sets(Wu2021_Breast_step4.malignant,       top_n = NULL)
+Chan_cci_sets_ranked     <- build_gene_cci_sets(Chan2021_Lung_step4.malignant,       top_n = NULL)
+Laughney_cci_sets_ranked <- build_gene_cci_sets(Laughney2020_Lung_step4.malignant,   top_n = NULL)
+Xing_cci_sets_ranked     <- build_gene_cci_sets(Xing2021_Lung_step4.malignant,       top_n = NULL)
+Kurten_cci_sets_ranked   <- build_gene_cci_sets(Kurten_HNSC.malignant,               top_n = NULL)
+Puram_cci_sets_ranked    <- build_gene_cci_sets(Puram_HNSC.malignant,                top_n = NULL)
+Choi_cci_sets_ranked     <- build_gene_cci_sets(Choi_HNSC.malignant,                 top_n = NULL)
+Bill_cci_sets_ranked     <- build_gene_cci_sets(Bill_HNSC.malignant,                 top_n = NULL)
+
+all_cci_sets_ranked <- list(
+  Bassez2021_Breast_step4   = Bassez_cci_sets_ranked,
+  Qian2020_Breast_step4     = Qian_cci_sets_ranked,
+  Wu2021_Breast_step4       = Wu_cci_sets_ranked,
+  Chan2021_Lung_step4       = Chan_cci_sets_ranked,
+  Laughney2020_Lung_step4   = Laughney_cci_sets_ranked,
+  Xing2021_Lung_step4       = Xing_cci_sets_ranked,
+  Kurten_HNSC               = Kurten_cci_sets_ranked,
+  Puram_HNSC                = Puram_cci_sets_ranked,
+  Choi_HNSC                 = Choi_cci_sets_ranked,
+  Bill_HNSC                 = Bill_cci_sets_ranked
+)
+
+# ── GENE-CCI INSPECTION TABLE ─────────────────────────────────────────────────
+# One tidy data frame per dataset: Gene | n_CCIs | CCI (one row per gene-CCI pair).
+# Usage: View(gene_cci_top500_summary$Bassez2021_Breast_step4)
+
+gene_cci_top500_summary <- purrr::imap(all_top_cci_sets, function(ds_sets, ds_name) {
+  
+  # Step 1: Create the un-arranged data frame
+  df <- purrr::imap_dfr(ds_sets, function(cci_vec, gene) {
+    if (length(cci_vec) == 0) return(NULL)
+    
+    data.frame(
+      Gene = gene, 
+      n_CCIs = length(cci_vec), 
+      CCI = cci_vec,
+      stringsAsFactors = FALSE
+    )
+  })
+  
+  # Step 2: Check if the resulting data frame is empty
+  # If it is, return an empty data frame with the correct columns to prevent errors
+  if (nrow(df) == 0 || !("Gene" %in% names(df))) {
+    return(data.frame(
+      Gene = character(), 
+      n_CCIs = integer(), 
+      CCI = character(), 
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Step 3: If not empty, arrange and return
+  df %>% arrange(.data$Gene, .data$CCI)
+})
+
+message("gene_cci_top500_summary ready — datasets: ",
+        paste(names(gene_cci_top500_summary), collapse = ", "))
+
+# ── Quick inspection (uncomment to run interactively) ─────────────────────────
+# View(gene_cci_top500_summary$Bassez2021_Breast_step4)
+# View(gene_cci_top500_summary$Qian2020_Breast_step4)
+# View(gene_cci_top500_summary$Wu2021_Breast_step4)
+# View(gene_cci_top500_summary$Chan2021_Lung_step4)
+# View(gene_cci_top500_summary$Laughney2020_Lung_step4)
+# View(gene_cci_top500_summary$Xing2021_Lung_step4)
+```
+
+
+
+
+
+# Gene-of-Interest — 6×6 Jaccard Heatmap Across All Datasets
+```{r gene-gene-jaccard}
+OUTPUT_DIR <- "~/Thesis/CCC/outputs/scDiffCom/plots/v3"
+GENE_OF_INT <- "AXL"
+goi_result        <- build_gene_dataset_jaccard(GENE_OF_INT, all_top_cci_sets)
+goi_jaccard_mat   <- goi_result$dist_mat
+goi_intersections <- goi_result$intersections   # list-matrix: [i,j] → shared CCI strings
+
+message(sprintf("\n%s — Jaccard distance matrix (top %d CCIs by |LOGFC|):",
+                GENE_OF_INT, TOP_N_CCI))
+print(round(goi_jaccard_mat, 3))
+
+# NA cells arise when a gene is absent in a dataset; display as "N/A", colour as 1.
+# Diagonal is NA (self-distance undefined); off-diagonal NAs → 1 for colour scale.
+goi_display_mat <- goi_jaccard_mat
+goi_display_mat[is.na(goi_display_mat) & row(goi_display_mat) != col(goi_display_mat)] <- 1
+
+goi_clust_mat <- goi_jaccard_mat
+goi_clust_mat[is.na(goi_clust_mat)] <- 1
+diag(goi_clust_mat) <- 0
+
+cell_annot <- matrix(
+  ifelse(row(goi_jaccard_mat) == col(goi_jaccard_mat), "",
+         ifelse(is.na(goi_jaccard_mat), "N/A", sprintf("%.3f", goi_jaccard_mat))),
+  nrow = nrow(goi_jaccard_mat),
+  dimnames = dimnames(goi_jaccard_mat)
+)
+
+goi_heatmap_file <- file.path(OUTPUT_DIR, paste0(GENE_OF_INT, "_jaccard_umap.png"))
+png(goi_heatmap_file, width = 5000, height = 3000, res = 300)
+
+# Dynamic color bounds for the plotted matrix
+goi_min_val <- min(goi_display_mat, na.rm = TRUE)
+goi_max_val <- max(goi_display_mat, na.rm = TRUE)
+goi_breaks  <- seq(goi_min_val, goi_max_val, length.out = 101)
+goi_leg_breaks <- pretty(c(goi_min_val, goi_max_val), n = 5)
+goi_leg_breaks <- goi_leg_breaks[goi_leg_breaks >= goi_min_val & goi_leg_breaks <= goi_max_val]
+goi_leg_labels <- format(round(goi_leg_breaks, 3), trim = TRUE)
+
+pheatmap(
+  goi_display_mat,
+  color             = colorRampPalette(c("#4575b4", "#ffffbf", "#d73027"))(100),
+  breaks            = goi_breaks,
+  na_col            = "grey80",
+  cluster_rows      = TRUE,
+  cluster_cols      = TRUE,
+  clustering_distance_rows = as.dist(goi_clust_mat),
+  clustering_distance_cols = as.dist(goi_clust_mat),
+  display_numbers   = cell_annot,
+  number_color      = "black",
+  fontsize_number   = 10,
+  fontsize_row      = 10,
+  fontsize_col      = 10,
+  angle_col         = "45",
+  main              = sprintf(
+    "%s — Jaccard Distance across Breast & Lung Datasets\n(top %d CCIs by |LOGFC|)",
+    GENE_OF_INT, TOP_N_CCI
+  ),
+  legend_breaks     = goi_leg_breaks,
+  legend_labels     = goi_leg_labels
+)
+
+dev.off()
+# Expose for inspection
+matrix_goi_jaccard   <- goi_jaccard_mat    # numeric distance matrix
+matrix_goi_intersect <- goi_intersections  # list-matrix of shared CCI strings
+
+# View(as.data.frame(matrix_goi_jaccard))
+# goi_intersections[["Bassez2021_Breast_step4", "Chan2021_Lung_step4"]]  # example lookup
+
+# ── AO: 6×6 distance heatmap for the same gene (full ranked lists) ────────────
+message(sprintf("\n%s — Average Overlap distance matrix (full ranked CCI lists):",
+                GENE_OF_INT))
+goi_ao_mat <- build_gene_dataset_ao(GENE_OF_INT, all_cci_sets_ranked)
+print(round(goi_ao_mat, 3))
+
+goi_ao_display_mat <- goi_ao_mat
+goi_ao_display_mat[is.na(goi_ao_display_mat) & row(goi_ao_display_mat) != col(goi_ao_display_mat)] <- 1
+
+goi_ao_clust_mat <- goi_ao_mat
+goi_ao_clust_mat[is.na(goi_ao_clust_mat)] <- 1
+diag(goi_ao_clust_mat) <- 0
+
+ao_cell_annot <- matrix(
+  ifelse(row(goi_ao_mat) == col(goi_ao_mat), "",
+         ifelse(is.na(goi_ao_mat), "N/A", sprintf("%.3f", goi_ao_mat))),
+  nrow = nrow(goi_ao_mat),
+  dimnames = dimnames(goi_ao_mat)
+)
+
+goi_ao_heatmap_file <- file.path(OUTPUT_DIR, paste0(GENE_OF_INT, "_ao_heatmap.png"))
+png(goi_ao_heatmap_file, width = 5000, height = 3000, res = 300)
+
+# Dynamic color bounds for the plotted matrix
+goi_ao_min_val <- min(goi_ao_display_mat, na.rm = TRUE)
+goi_ao_max_val <- max(goi_ao_display_mat, na.rm = TRUE)
+goi_ao_breaks  <- seq(goi_ao_min_val, goi_ao_max_val, length.out = 101)
+goi_ao_leg_breaks <- pretty(c(goi_ao_min_val, goi_ao_max_val), n = 5)
+goi_ao_leg_breaks <- goi_ao_leg_breaks[goi_ao_leg_breaks >= goi_ao_min_val & goi_ao_leg_breaks <= goi_ao_max_val]
+goi_ao_leg_labels <- format(round(goi_ao_leg_breaks, 3), trim = TRUE)
+
+pheatmap(
+  goi_ao_display_mat,
+  color             = colorRampPalette(c("#4575b4", "#ffffbf", "#d73027"))(100),
+  breaks            = goi_ao_breaks,
+  na_col            = "grey80",
+  cluster_rows      = TRUE,
+  cluster_cols      = TRUE,
+  clustering_distance_rows = as.dist(goi_ao_clust_mat),
+  clustering_distance_cols = as.dist(goi_ao_clust_mat),
+  display_numbers   = ao_cell_annot,
+  number_color      = "black",
+  fontsize_number   = 10,
+  fontsize_row      = 10,
+  fontsize_col      = 10,
+  angle_col         = "45",
+  main              = sprintf(
+    "%s — Average Overlap Distance across Breast & Lung Datasets\n(full ranked CCIs by |LOGFC|)",
+    GENE_OF_INT
+  ),
+  legend_breaks     = goi_ao_leg_breaks,
+  legend_labels     = goi_ao_leg_labels
+)
+dev.off()
+
+matrix_goi_ao <- goi_ao_mat
+```
+
+
+
+
+
+
+
+
+# Global Jaccard UMAP — All Genes × All Six Datasets
+```{r global-jaccard-umap}
+# if (!requireNamespace("batchelor", quietly = TRUE))
+#   stop("Install batchelor via: BiocManager::install('batchelor')")
+# library(batchelor)
+
+# ── CONFIG (UMAP-specific) ────────────────────────────────────────────────────
+K_UMAP        <- 15
+MIN_DIST_UMAP <- 0.1
+UMAP_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
+
+for (UMAP_CANCER_FILTER in UMAP_CANCER_FILTER_OPTIONS) {
+message("\n===== UMAP_CANCER_FILTER: ", UMAP_CANCER_FILTER, " =====")
+
+# ── 1. CCI vocabulary (restricted to included datasets when filtering) ────────
+{
+  included_ds_full <- if (UMAP_CANCER_FILTER == "All") {
+    names(all_top_cci_sets)
+  } else {
+    names(all_top_cci_sets)[ds_cancer_map[names(all_top_cci_sets)] == UMAP_CANCER_FILTER]
+  }
+  all_top_ccis <- unique(unlist(lapply(all_top_cci_sets[included_ds_full],
+                                       function(ds) unlist(unname(ds)))))
+}
+message("Unique CCIs in included datasets (", UMAP_CANCER_FILTER, "): ", length(all_top_ccis))
+
+# ── 2. Gene_Dataset entries with binary CCI membership vectors ────────────────
+gene_dataset_rows <- purrr::imap(all_top_cci_sets, function(ds_sets, ds_full) {
+  ds_short <- ds_short_map[[ds_full]]
+  cancer   <- ds_cancer_map[[ds_full]]
+  purrr::imap(ds_sets, function(cci_vec, gene) {
+    list(label       = paste0(gene, "_", ds_short),
+         gene        = gene,
+         dataset     = ds_short,
+         cancer_type = cancer,
+         ccis        = cci_vec,                           # raw CCI strings retained
+         vec         = as.integer(all_top_ccis %in% cci_vec))
+  })
+}) %>% purrr::flatten()
+
+# ── 2b. Filter by cancer type ─────────────────────────────────────────────────
+if (!UMAP_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
+  stop("UMAP_CANCER_FILTER must be one of: \"All\", \"Breast\", \"Lung\", \"H&N\"")
+if (UMAP_CANCER_FILTER != "All") {
+  gene_dataset_rows <- gene_dataset_rows[
+    sapply(gene_dataset_rows, function(x) x$cancer_type == UMAP_CANCER_FILTER)
+  ]
+  message("After cancer-type filter (", UMAP_CANCER_FILTER, "): ",
+          length(gene_dataset_rows), " rows")
+}
+
+non_empty         <- sapply(gene_dataset_rows, function(x) sum(x$vec) > 0)
+gene_dataset_rows <- gene_dataset_rows[non_empty]
+message("Gene_Dataset pairs (non-empty): ", length(gene_dataset_rows))
+
+# ── 3. Binary matrix (Gene_Dataset) × CCIs ────────────────────────────────────
+labels_gd      <- sapply(gene_dataset_rows, `[[`, "label")
+genes_gd       <- sapply(gene_dataset_rows, `[[`, "gene")
+datasets_gd    <- sapply(gene_dataset_rows, `[[`, "dataset")
+cancer_type_gd <- sapply(gene_dataset_rows, `[[`, "cancer_type")
+
+bin_mat <- do.call(rbind, lapply(gene_dataset_rows, `[[`, "vec"))
+rownames(bin_mat) <- labels_gd
+message("Binary matrix: ", nrow(bin_mat), " rows × ", ncol(bin_mat), " CCI columns")
+
+# ── 3b. CCI set lookup & pairwise intersection object ─────────────────────────
+# Named list: Gene_Dataset label → character vector of its CCIs
+gene_ds_ccis <- setNames(
+  lapply(gene_dataset_rows, `[[`, "ccis"),
+  labels_gd
+)
+
+# Helper: return CCIs shared between any two Gene_Dataset labels
+get_mutual_ccis <- function(gd1, gd2) {
+  s1 <- gene_ds_ccis[[gd1]]
+  s2 <- gene_ds_ccis[[gd2]]
+  if (is.null(s1) || is.null(s2)) stop("Label not found. Available: ", paste(names(gene_ds_ccis), collapse = ", "))
+  intersect(s1, s2)
+}
+
+# Comprehensive pairwise intersection table (long format, list-column for CCIs)
+# Builds upper-triangle only (n*(n-1)/2 rows) to avoid duplication.
+{
+  n   <- length(labels_gd)
+  idx <- which(upper.tri(matrix(0, n, n)), arr.ind = TRUE)
+  list_gene_cci_intersections <- tibble::tibble(
+    GD1          = labels_gd[idx[, 1]],
+    GD2          = labels_gd[idx[, 2]],
+    mutual_ccis  = mapply(
+      function(i, j) intersect(gene_ds_ccis[[labels_gd[i]]], gene_ds_ccis[[labels_gd[j]]]),
+      idx[, 1], idx[, 2],
+      SIMPLIFY = FALSE
+    ),
+    n_mutual     = sapply(
+      seq_len(nrow(idx)),
+      function(k) length(intersect(gene_ds_ccis[[labels_gd[idx[k, 1]]]],
+                                   gene_ds_ccis[[labels_gd[idx[k, 2]]]]))
+    )
+  )
+}
+message("Pairwise intersection table: ", nrow(list_gene_cci_intersections), " pairs")
+
+# ── 4. Jaccard distance (efficient matrix multiplication) ─────────────────────
+cross     <- tcrossprod(bin_mat)
+row_sums  <- rowSums(bin_mat)
+union_mat <- outer(row_sums, row_sums, "+") - cross
+union_mat[union_mat == 0] <- NA_real_
+
+jac_dist_mat <- 1 - cross / union_mat
+diag(jac_dist_mat) <- 0
+jac_dist_mat[is.na(jac_dist_mat)] <- 1
+
+# ── 5. UMAP ───────────────────────────────────────────────────────────────────
+set.seed(SEED)
+k_eff       <- min(K_UMAP, nrow(jac_dist_mat) - 1)
+umap_global <- uwot::umap(as.dist(jac_dist_mat),
+                           n_neighbors = k_eff, min_dist = MIN_DIST_UMAP)
+
+# ── 6. Plot data frame ────────────────────────────────────────────────────────
+umap_global_df <- data.frame(
+  UMAP1       = umap_global[, 1],
+  UMAP2       = umap_global[, 2],
+  Label       = labels_gd,
+  Gene        = genes_gd,
+  Source      = datasets_gd,
+  Cancer_Type = cancer_type_gd,
+  stringsAsFactors = FALSE
+)
+
+# ── 7. Plot ───────────────────────────────────────────────────────────────────
+umap_title_suffix <- if (UMAP_CANCER_FILTER == "All") "All Cancer Types" else
+                       paste0(UMAP_CANCER_FILTER, " Only")
+umap_out_tag      <- tolower(UMAP_CANCER_FILTER)   # "all" / "breast" / "lung"
+
+p_global <- ggplot(umap_global_df,
+                   aes(x = UMAP1, y = UMAP2,
+                       colour = Source, shape = Cancer_Type)) +
+  geom_point(size = 1.8, alpha = 0.8) +
+  ggrepel::geom_text_repel(aes(label = Gene),
+    size = 2.5, max.overlaps = Inf,
+    box.padding = 0.3, segment.size = 0.2, segment.alpha = 0.4,
+    show.legend = FALSE) +
+  scale_colour_manual(values = source_colors) +
+  scale_shape_manual(values = cancer_shapes) +
+  theme_classic(base_size = 13) +
+  labs(
+    title    = paste0("Global Gene UMAP — Jaccard Distance on CCI Profiles (",
+                      umap_title_suffix, ")"),
+    subtitle = sprintf("Each point = Gene × Dataset | top %d CCIs by |LOGFC|", TOP_N_CCI),
+    colour = "Source", shape = "Cancer Type", x = "UMAP 1", y = "UMAP 2"
+  )
+
+print(p_global)
+ggsave(file.path(OUTPUT_DIR, sprintf("global_jaccard_umap_%s.png", umap_out_tag)),
+       plot = p_global, width = 13, height = 9, dpi = 300)
+message("Global UMAP saved (", UMAP_CANCER_FILTER, ")")
+
+# ── 5b. MNN-corrected UMAP (Jaccard) ─────────────────────────────────────────
+# bin_mat (Gene_Dataset x CCIs) → fastMNN applies internal PCA then finds
+# Mutual Nearest Neighbors across dataset batches → UMAP on corrected embedding.
+message("Applying MNN batch correction on Jaccard binary matrix ...")
+k_mnn_jac <- min(20L, min(table(factor(datasets_gd))) - 1L)
+mnn_jac <- batchelor::fastMNN(
+  t(bin_mat),
+  batch  = factor(datasets_gd),
+  d      = min(50L, nrow(bin_mat) - 1L),
+  k      = k_mnn_jac
+)
+corrected_jac <- as.matrix(SingleCellExperiment::reducedDim(mnn_jac, "corrected"))
+rownames(corrected_jac) <- labels_gd
+message("MNN (Jaccard) correction complete; corrected dim: ",
+        nrow(corrected_jac), " x ", ncol(corrected_jac))
+
+set.seed(SEED)
+k_eff_mnn_jac <- min(K_UMAP, nrow(corrected_jac) - 1L)
+umap_mnn_jac  <- uwot::umap(corrected_jac,
+                              n_neighbors = k_eff_mnn_jac,
+                              min_dist    = MIN_DIST_UMAP)
+
+umap_mnn_jac_df <- data.frame(
+  UMAP1       = umap_mnn_jac[, 1],
+  UMAP2       = umap_mnn_jac[, 2],
+  Label       = labels_gd,
+  Gene        = genes_gd,
+  Source      = datasets_gd,
+  Cancer_Type = cancer_type_gd,
+  stringsAsFactors = FALSE
+)
+
+p_global_mnn_jac <- ggplot(umap_mnn_jac_df,
+                            aes(x = UMAP1, y = UMAP2,
+                                colour = Source, shape = Cancer_Type)) +
+  geom_point(size = 1.8, alpha = 0.8) +
+  ggrepel::geom_text_repel(aes(label = Gene),
+    size = 2.5, max.overlaps = Inf,
+    box.padding = 0.3, segment.size = 0.2, segment.alpha = 0.4,
+    show.legend = FALSE) +
+  scale_colour_manual(values = source_colors) +
+  scale_shape_manual(values = cancer_shapes) +
+  theme_classic(base_size = 13) +
+  labs(
+    title    = paste0("Global Gene UMAP — Jaccard + MNN Batch Correction (",
+                      umap_title_suffix, ")"),
+    subtitle = sprintf(
+      "Each point = Gene x Dataset | top %d CCIs by |LOGFC| | batchelor::fastMNN corrected",
+      TOP_N_CCI),
+    colour = "Source", shape = "Cancer Type", x = "UMAP 1", y = "UMAP 2"
+  )
+
+print(p_global_mnn_jac)
+ggsave(file.path(OUTPUT_DIR, sprintf("global_jaccard_mnn_umap_%s.png", umap_out_tag)),
+       plot = p_global_mnn_jac, width = 13, height = 9, dpi = 300)
+message("Global Jaccard MNN UMAP saved (", UMAP_CANCER_FILTER, ")")
+
+# ── Expose for inspection ────────────────────────────────────────────────────
+matrix_umap_input <- bin_mat   # numeric: rows = Gene_Dataset, cols = CCIs (binary)
+# list_gene_cci_intersections   # tibble with columns GD1, GD2, mutual_ccis (list), n_mutual
+# gene_ds_ccis                  # named list: label → character vector of CCIs
+# get_mutual_ccis(gd1, gd2)     # helper: returns shared CCI strings for any two labels
+
+# ── AO UMAP (full ranked lists, same gene×dataset pairs) ─────────────────────
+ # Build a reverse map from short dataset name to full dataset key
+ds_full_map <- setNames(names(ds_short_map), ds_short_map)
+
+# Retrieve the full ranked CCI list for each gene×dataset pair already in labels_gd
+gene_ds_ccis_ranked <- setNames(
+  lapply(gene_dataset_rows, function(x) {
+    ds_full <- ds_full_map[[x$dataset]]
+    all_cci_sets_ranked[[ds_full]][[x$gene]]
+  }),
+  labels_gd
+)
+
+message("Computing pairwise Average Overlap distances for ", length(labels_gd),
+        " Gene×Dataset pairs — this may take several minutes...")
+n_gd <- length(labels_gd)
+ao_dist_mat <- matrix(0, nrow = n_gd, ncol = n_gd, dimnames = list(labels_gd, labels_gd))
+for (i in seq_len(n_gd - 1)) {
+  for (j in (i + 1):n_gd) {
+    d <- dist_fun_superranker_overlap(gene_ds_ccis_ranked[[labels_gd[i]]],
+                                     gene_ds_ccis_ranked[[labels_gd[j]]])
+    ao_dist_mat[i, j] <- d
+    ao_dist_mat[j, i] <- d
+  }
+}
+ao_dist_mat[is.na(ao_dist_mat)] <- 1
+message("AO distance matrix complete.")
+
+set.seed(SEED)
+k_eff_ao  <- min(K_UMAP, nrow(ao_dist_mat) - 1)
+umap_ao   <- uwot::umap(as.dist(ao_dist_mat),
+                         n_neighbors = k_eff_ao, min_dist = MIN_DIST_UMAP)
+
+umap_ao_df <- data.frame(
+  UMAP1       = umap_ao[, 1],
+  UMAP2       = umap_ao[, 2],
+  Label       = labels_gd,
+  Gene        = genes_gd,
+  Source      = datasets_gd,
+  Cancer_Type = cancer_type_gd,
+  stringsAsFactors = FALSE
+)
+
+p_global_ao <- ggplot(umap_ao_df,
+                      aes(x = UMAP1, y = UMAP2,
+                          colour = Source, shape = Cancer_Type)) +
+  geom_point(size = 1.8, alpha = 0.8) +
+  ggrepel::geom_text_repel(aes(label = Gene),
+    size = 2.5, max.overlaps = Inf,
+    box.padding = 0.3, segment.size = 0.2, segment.alpha = 0.4,
+    show.legend = FALSE) +
+  scale_colour_manual(values = source_colors) +
+  scale_shape_manual(values = cancer_shapes) +
+  theme_classic(base_size = 13) +
+  labs(
+    title    = paste0("Global Gene UMAP — Average Overlap Distance on CCI Profiles (",
+                      umap_title_suffix, ")"),
+    subtitle = "Each point = Gene × Dataset | full ranked CCIs by |LOGFC|",
+    colour = "Source", shape = "Cancer Type", x = "UMAP 1", y = "UMAP 2"
+  )
+
+print(p_global_ao)
+ggsave(file.path(OUTPUT_DIR, sprintf("global_ao_umap_%s.png", umap_out_tag)),
+       plot = p_global_ao, width = 13, height = 9, dpi = 300)
+message("Global AO UMAP saved (", UMAP_CANCER_FILTER, ")")
+
+# ── AO: MNN-corrected UMAP (Average Overlap) ─────────────────────────────────
+# ao_dist_mat has no feature matrix, so classical MDS is used first to produce
+# Euclidean coordinates; fastMNN then corrects those coordinates across batches.
+message("Applying MNN batch correction on Average Overlap distance matrix ...")
+n_mds_ao      <- min(50L, nrow(ao_dist_mat) - 1L)
+mds_ao_coords <- cmdscale(as.dist(ao_dist_mat), k = n_mds_ao)
+
+k_mnn_ao <- min(20L, min(table(factor(datasets_gd))) - 1L)
+mnn_ao <- batchelor::fastMNN(
+  t(mds_ao_coords),
+  batch  = factor(datasets_gd),
+  d      = min(30L, n_mds_ao),
+  k      = k_mnn_ao
+)
+corrected_ao <- as.matrix(SingleCellExperiment::reducedDim(mnn_ao, "corrected"))
+rownames(corrected_ao) <- labels_gd
+message("MNN (AO) correction complete; corrected dim: ",
+        nrow(corrected_ao), " x ", ncol(corrected_ao))
+
+set.seed(SEED)
+k_eff_mnn_ao <- min(K_UMAP, nrow(corrected_ao) - 1L)
+umap_mnn_ao  <- uwot::umap(corrected_ao,
+                             n_neighbors = k_eff_mnn_ao,
+                             min_dist    = MIN_DIST_UMAP)
+
+umap_mnn_ao_df <- data.frame(
+  UMAP1       = umap_mnn_ao[, 1],
+  UMAP2       = umap_mnn_ao[, 2],
+  Label       = labels_gd,
+  Gene        = genes_gd,
+  Source      = datasets_gd,
+  Cancer_Type = cancer_type_gd,
+  stringsAsFactors = FALSE
+)
+
+p_global_mnn_ao <- ggplot(umap_mnn_ao_df,
+                           aes(x = UMAP1, y = UMAP2,
+                               colour = Source, shape = Cancer_Type)) +
+  geom_point(size = 1.8, alpha = 0.8) +
+  ggrepel::geom_text_repel(aes(label = Gene),
+    size = 2.5, max.overlaps = Inf,
+    box.padding = 0.3, segment.size = 0.2, segment.alpha = 0.4,
+    show.legend = FALSE) +
+  scale_colour_manual(values = source_colors) +
+  scale_shape_manual(values = cancer_shapes) +
+  theme_classic(base_size = 13) +
+  labs(
+    title    = paste0("Global Gene UMAP — Average Overlap + MNN Batch Correction (",
+                      umap_title_suffix, ")"),
+    subtitle = "Each point = Gene x Dataset | full ranked CCIs by |LOGFC| | batchelor::fastMNN corrected",
+    colour = "Source", shape = "Cancer Type", x = "UMAP 1", y = "UMAP 2"
+  )
+
+print(p_global_mnn_ao)
+ggsave(file.path(OUTPUT_DIR, sprintf("global_ao_mnn_umap_%s.png", umap_out_tag)),
+       plot = p_global_mnn_ao, width = 13, height = 10, dpi = 300)
+message("Global AO MNN UMAP saved (", UMAP_CANCER_FILTER, ")")
+
+} # end for (UMAP_CANCER_FILTER in c("All", "Breast", "Lung"))
+# NOTE: labels_gd, gene_ds_ccis, list_gene_cci_intersections below reflect
+# the last loop iteration ("Lung"). Re-run that block manually for other filters.
+
+# ── Gene-of-interest cross-dataset CCI analysis (set GENE_OF_INT in config) ──
+goi_labels <- grep(paste0("^", GENE_OF_INT, "_"), labels_gd, value = TRUE)
+message(GENE_OF_INT, " found in datasets: ", paste(goi_labels, collapse = ", "))
+
+if (length(goi_labels) >= 2) {
+  goi_sets   <- gene_ds_ccis[goi_labels]
+  goi_all    <- Reduce(union,     goi_sets)
+  goi_shared <- Reduce(intersect, goi_sets)
+  message(GENE_OF_INT, " union CCIs (any dataset): ",      length(goi_all))
+  message(GENE_OF_INT, " conserved CCIs (all datasets): ", length(goi_shared))
+
+  # Per-label: CCIs unique to that dataset (not present in any other dataset for this gene)
+  goi_unique <- setNames(
+    lapply(goi_labels, function(lbl) {
+      setdiff(goi_sets[[lbl]], Reduce(union, goi_sets[setdiff(goi_labels, lbl)]))
+    }),
+    goi_labels
+  )
+
+  # Summary table
+  goi_summary <- data.frame(
+    Label       = goi_labels,
+    N_total     = sapply(goi_sets,   length),
+    N_conserved = sapply(goi_sets,   function(s) length(intersect(s, goi_shared))),
+    N_unique    = sapply(goi_unique, length),
+    stringsAsFactors = FALSE
+  )
+  print(goi_summary)
+
+  if (length(goi_shared) > 0) {
+    message("\nCCIs conserved across ALL ", GENE_OF_INT, " datasets:")
+    print(sort(goi_shared))
+  } else {
+    message("No CCIs conserved across ALL ", GENE_OF_INT, " datasets.")
+  }
+
+  # Pairwise intersections between all datasets for this gene
+  goi_pairwise <- list_gene_cci_intersections %>%
+    dplyr::filter(GD1 %in% goi_labels & GD2 %in% goi_labels) %>%
+    dplyr::arrange(dplyr::desc(n_mutual))
+  if (nrow(goi_pairwise) > 0) print(goi_pairwise[, c("GD1", "GD2", "n_mutual")])
+} else {
+  message(GENE_OF_INT, " not found (or only in one dataset) — check GENE_OF_INT in config.")
+}
+
+# Quick-access convenience (uncomment to open in RStudio viewer)
+# View(umap_global_df)
+# View(as.data.frame(matrix_umap_input[1:50, 1:20]))
+# View(list_gene_cci_intersections)
+# get_mutual_ccis(paste0(GENE_OF_INT, "_Lung"), paste0(GENE_OF_INT, "_Breast"))
+```
+
+
+
+
+
+# Gene-Gene Consensus Jaccard Matrix
+```{r gene-gene-clustering}
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+TOP_N_GENES <- 400  # genes ranked by total union CCI count
+GENE_GENE_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
+for (GENE_GENE_CANCER_FILTER in GENE_GENE_CANCER_FILTER_OPTIONS) {
+message("\n===== GENE_GENE_CANCER_FILTER: ", GENE_GENE_CANCER_FILTER, " =====")
+
+# ── 1. Union CCI set per gene (restricted to included datasets) ───────────────
+if (!GENE_GENE_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
+  stop("GENE_GENE_CANCER_FILTER must be one of: \"All\", \"Breast\", \"Lung\", \"H&N\"")
+{
+  included_cci_sets <- if (GENE_GENE_CANCER_FILTER == "All") {
+    all_top_cci_sets
+  } else {
+    all_top_cci_sets[ds_cancer_map[names(all_top_cci_sets)] == GENE_GENE_CANCER_FILTER]
+  }
+}
+message("Gene–Gene matrix using datasets (", GENE_GENE_CANCER_FILTER, "): ",
+        paste(names(included_cci_sets), collapse = ", "))
+
+all_gene_names <- sort(unique(unlist(lapply(included_cci_sets, names))))
+gene_cci_union <- setNames(
+  lapply(all_gene_names, function(g) {
+    unique(unlist(lapply(included_cci_sets, function(ds) ds[[g]])))
+  }),
+  all_gene_names
+)
+gene_cci_union <- Filter(function(x) length(x) > 0, gene_cci_union)
+message("Genes with at least one CCI (union): ", length(gene_cci_union))
+
+# ── 2. Top N genes by union CCI count ─────────────────────────────────────────
+cci_counts <- sapply(gene_cci_union, length)
+top_genes  <- sort(names(sort(cci_counts, decreasing = TRUE))[
+  seq_len(min(TOP_N_GENES, length(cci_counts)))])
+gene_cci_top <- gene_cci_union[top_genes]
+message("Top ", length(top_genes), " genes selected")
+
+# ── 3. Gene × CCI binary matrix ───────────────────────────────────────────────
+all_ccis_top <- unique(unlist(gene_cci_top))
+gene_bin_mat <- do.call(rbind, lapply(gene_cci_top, function(v) as.integer(all_ccis_top %in% v)))
+rownames(gene_bin_mat) <- top_genes
+message("Gene binary matrix: ", nrow(gene_bin_mat), " × ", ncol(gene_bin_mat))
+
+# ── 3b. Gene-level pairwise CCI intersection object ───────────────────────────
+# Helper: return CCIs shared between any two top genes (union-across-datasets sets)
+get_mutual_ccis_genes <- function(gene1, gene2) {
+  s1 <- gene_cci_top[[gene1]]
+  s2 <- gene_cci_top[[gene2]]
+  if (is.null(s1) || is.null(s2)) stop("Gene not found. Available: ", paste(top_genes, collapse = ", "))
+  intersect(s1, s2)
+}
+
+# Pairwise intersection table for all top-gene pairs (upper-triangle, long format)
+{
+  ng  <- length(top_genes)
+  idx_g <- which(upper.tri(matrix(0, ng, ng)), arr.ind = TRUE)
+  list_gene_pairwise_intersections <- tibble::tibble(
+    GeneA        = top_genes[idx_g[, 1]],
+    GeneB        = top_genes[idx_g[, 2]],
+    mutual_ccis  = mapply(
+      function(i, j) intersect(gene_cci_top[[top_genes[i]]], gene_cci_top[[top_genes[j]]]),
+      idx_g[, 1], idx_g[, 2],
+      SIMPLIFY = FALSE
+    ),
+    n_mutual     = sapply(
+      seq_len(nrow(idx_g)),
+      function(k) length(intersect(gene_cci_top[[top_genes[idx_g[k, 1]]]],
+                                   gene_cci_top[[top_genes[idx_g[k, 2]]]]))
+    )
+  )
+}
+message("Gene pairwise intersection table: ", nrow(list_gene_pairwise_intersections), " pairs")
+
+# ── 4. Consensus Jaccard distance (Gene × Gene) ───────────────────────────────
+cross_g <- tcrossprod(gene_bin_mat)
+rsums_g <- rowSums(gene_bin_mat)
+union_g <- outer(rsums_g, rsums_g, "+") - cross_g
+union_g[union_g == 0] <- NA_real_
+
+gene_jac_dist <- 1 - cross_g / union_g
+diag(gene_jac_dist) <- NA_real_
+gene_jac_dist_clust <- gene_jac_dist
+gene_jac_dist_clust[is.na(gene_jac_dist_clust)] <- 1
+diag(gene_jac_dist_clust) <- 0
+gene_jac_dist[is.na(gene_jac_dist) & row(gene_jac_dist) != col(gene_jac_dist)] <- 1
+
+matrix_global_gene_distance <- gene_jac_dist
+
+# ── 5. Heatmap ────────────────────────────────────────────────────────────────
+{
+  disp_nums_jac <- matrix(sprintf("%.2f", gene_jac_dist),
+                          nrow = nrow(gene_jac_dist), dimnames = dimnames(gene_jac_dist))
+  diag(disp_nums_jac) <- ""
+}
+heatmap_args <- list(
+  gene_jac_dist,
+  color           = colorRampPalette(c("#4575b4", "#ffffbf", "#d73027"))(100),
+  breaks          = seq(min(gene_jac_dist, na.rm = TRUE),
+                        max(gene_jac_dist, na.rm = TRUE),
+                        length.out = 101),
+  na_col          = "grey80",
+  cluster_rows    = TRUE,
+  cluster_cols    = TRUE,
+  # clustering_distance_rows = as.dist(gene_jac_dist_clust),
+  # clustering_distance_cols = as.dist(gene_jac_dist_clust),
+  #display_numbers = disp_nums_jac,
+  #number_color    = "black",
+  #fontsize_number = 8,
+  fontsize_row    = max(4, 120 / length(top_genes)),
+  fontsize_col    = max(4, 120 / length(top_genes)),
+  angle_col       = "45",
+  main            = sprintf(
+    "Gene–Gene Jaccard Distance — (%s)",
+    if (GENE_GENE_CANCER_FILTER == "All") "consensus across all datasets"
+    else paste0(GENE_GENE_CANCER_FILTER, " datasets only"))
+)
+
+do.call(pheatmap, heatmap_args)
+
+gene_heatmap_file <- file.path(OUTPUT_DIR,
+  sprintf("gene_gene_jaccard_heatmap_%s.png", tolower(GENE_GENE_CANCER_FILTER)))
+do.call(pheatmap, c(heatmap_args, list(filename = gene_heatmap_file,
+                                       width    = 3000 / 300,
+                                       height   = 3000 / 300)))
+message("Heatmap saved to ", gene_heatmap_file)
+
+# ── RBO: Gene × Gene distance matrix (same top genes, full ranked lists) ─────
+# For each top gene, build a consensus ranked CCI list across included datasets:
+# CCIs appearing in more datasets rank first; ties broken by mean rank position.
+{
+  included_cci_sets_ranked <- if (GENE_GENE_CANCER_FILTER == "All") {
+    all_cci_sets_ranked
+  } else {
+    all_cci_sets_ranked[ds_cancer_map[names(all_cci_sets_ranked)] == GENE_GENE_CANCER_FILTER]
+  }
+}
+
+gene_cci_consensus_ranked <- setNames(
+  lapply(top_genes, function(g) {
+    rank_data <- purrr::imap_dfr(included_cci_sets_ranked, function(ds_sets, ds_name) {
+      cci_vec <- ds_sets[[g]]
+      if (is.null(cci_vec) || length(cci_vec) == 0) return(NULL)
+      data.frame(CCI = cci_vec, rank_pos = seq_along(cci_vec), stringsAsFactors = FALSE)
+    })
+    if (nrow(rank_data) == 0) return(character(0))
+    rank_data %>%
+      group_by(CCI) %>%
+      summarise(n_datasets = n(), mean_rank = mean(rank_pos), .groups = "drop") %>%
+      arrange(desc(n_datasets), mean_rank) %>%
+      pull(CCI)
+  }),
+  top_genes
+)
+
+
+# ── AO: Gene × Gene distance matrix (same top genes, full ranked lists) ──────
+message("Computing gene–gene Average Overlap distances for ", length(top_genes), " genes...")
+ng <- length(top_genes)
+gene_ao_dist <- matrix(0, nrow = ng, ncol = ng,
+                       dimnames = list(top_genes, top_genes))
+for (i in seq_len(ng - 1)) {
+  for (j in (i + 1):ng) {
+    d <- dist_fun_superranker_overlap(gene_cci_consensus_ranked[[top_genes[i]]],
+                                     gene_cci_consensus_ranked[[top_genes[j]]])
+    gene_ao_dist[i, j] <- d
+    gene_ao_dist[j, i] <- d
+  }
+}
+gene_ao_dist_clust <- gene_ao_dist
+gene_ao_dist_clust[is.na(gene_ao_dist_clust)] <- 1
+diag(gene_ao_dist) <- NA_real_
+matrix_global_gene_ao_distance <- gene_ao_dist
+message("Gene–gene AO matrix complete.")
+
+{
+  disp_nums_ao <- matrix(sprintf("%.2f", gene_ao_dist),
+                         nrow = nrow(gene_ao_dist), dimnames = dimnames(gene_ao_dist))
+  diag(disp_nums_ao) <- ""
+}
+ao_heatmap_args <- list(
+  gene_ao_dist,
+  color           = colorRampPalette(c("#4575b4", "#ffffbf", "#d73027"))(100),
+  breaks          = seq(min(gene_ao_dist, na.rm = TRUE),
+                        max(gene_ao_dist, na.rm = TRUE),
+                        length.out = 101),
+  na_col          = "grey80",
+  cluster_rows    = TRUE,
+  cluster_cols    = TRUE,
+  # clustering_distance_rows = as.dist(gene_ao_dist_clust),
+  # clustering_distance_cols = as.dist(gene_ao_dist_clust),
+ # display_numbers = disp_nums_ao,
+  #number_color    = "black",
+  #fontsize_number = 8,
+  fontsize_row    = max(4, 120 / length(top_genes)),
+  fontsize_col    = max(4, 120 / length(top_genes)),
+  angle_col       = "45",
+  main            = sprintf(
+    "Gene–Gene Average Overlap Distance — (%s)",
+    if (GENE_GENE_CANCER_FILTER == "All") "consensus across all datasets"
+    else paste0(GENE_GENE_CANCER_FILTER, " datasets only"))
+)
+
+do.call(pheatmap, ao_heatmap_args)
+
+gene_ao_heatmap_file <- file.path(OUTPUT_DIR,
+  sprintf("gene_gene_ao_heatmap_%s.png", tolower(GENE_GENE_CANCER_FILTER)))
+do.call(pheatmap, c(ao_heatmap_args, list(filename = gene_ao_heatmap_file,
+                                           width    = 3000 / 300,
+                                           height   = 3000 / 300)))
+message("AO heatmap saved to ", gene_ao_heatmap_file)
+
+} # end for (GENE_GENE_CANCER_FILTER in c("All", "Breast", "Lung"))
+# NOTE: matrix_global_gene_* and gene_cci_* below reflect the last iteration ("Lung").
+
+# ── Expose for inspection ────────────────────────────────────────────────────
+# matrix_global_gene_distance          # Gene × Gene Jaccard distance matrix (top-500 lists)
+# matrix_global_gene_ao_distance       # Gene × Gene AO distance matrix (full ranked lists)
+# list_gene_pairwise_intersections      # tibble: GeneA, GeneB, mutual_ccis (list), n_mutual
+# gene_cci_top                          # named list: gene → union CCI character vector (Jaccard)
+# gene_cci_consensus_ranked             # named list: gene → consensus ranked CCI vector (AO)
+# get_mutual_ccis_genes(gene1, gene2)   # helper: shared CCIs for any two top genes
+
+# Quick-access convenience (uncomment to open in RStudio viewer)
+# View(as.data.frame(matrix_global_gene_distance))
+# View(list_gene_pairwise_intersections)
+# get_mutual_ccis_genes("CTLA4", "CD274")
+```
+
+
+# GENES x LRI Heatmap & UMAP
+```{r genes-lri}
+library(umap)
+
+build_lri_logfc_mat <- function(malignant_list, min_genes = MIN_GENES_PER_CCI) {
+  lri_list <- lapply(names(malignant_list), function(gene) {
+    malignant_list[[gene]] %>%
+      select(LRI, LOGFC) %>%
+      group_by(LRI) %>%
+      summarise(LOGFC = mean(LOGFC, na.rm = TRUE), .groups = "drop") %>%
+      mutate(Gene = gene)
+  })
+
+  all_data <- bind_rows(lri_list)
+  mat_long <- all_data %>%
+    pivot_wider(names_from = Gene, values_from = LOGFC)
+
+  mat <- as.matrix(mat_long[, -1])
+  rownames(mat) <- mat_long$LRI
+  message("  Matrix dimensions (LRIs x Genes): ", nrow(mat), " x ", ncol(mat))
+
+  n_non_na <- rowSums(!is.na(mat))
+  mat <- mat[n_non_na >= min_genes, , drop = FALSE]
+  message("  After filtering sparse LRIs: ", nrow(mat), " x ", ncol(mat))
+  mat
+}
+
+plot_lri_heatmap_umap <- function(malignant_list, dataset_label,
+                                  k_clusters = 5,
+                                  min_genes  = MIN_GENES_PER_CCI) {
+  message("\n=== GENES x LRI: ", dataset_label, " ===")
+
+  mat     <- build_lri_logfc_mat(malignant_list, min_genes)
+  sim_mat <- cosine_sim_na(mat)
+  diag(sim_mat) <- NA
+
+  gene_order <- sort(rownames(sim_mat))
+  sim_mat    <- sim_mat[gene_order, gene_order]
+  n_genes    <- nrow(sim_mat)
+
+  sim_mat_clust <- sim_mat
+  diag(sim_mat_clust) <- 1
+  sim_mat_clust[is.na(sim_mat_clust)] <- 0
+  dist_for_clust <- as.dist(1 - sim_mat_clust)
+
+  # Heatmap
+  heatmap_file <- file.path(OUTPUT_DIR, paste0(dataset_label, "_lri_heatmap.png"))
+  png(heatmap_file,
+      width  = max(4000, n_genes * 20),
+      height = max(4000, n_genes * 20),
+      res    = 300)
+  pheatmap(
+    sim_mat,
+    color        = colorRampPalette(c("red", "white", "blue"))(100),
+    breaks       = seq(-1, 1, length.out = 101),
+    na_col       = "grey80",
+    fontsize_row = max(4, 200 / n_genes),
+    fontsize_col = max(4, 200 / n_genes),
+    angle_col    = "45",
+    cluster_cols = TRUE,
+    cluster_rows = TRUE,
+    clustering_distance_rows = dist_for_clust,
+    clustering_distance_cols = dist_for_clust,
+    main         = paste0(dataset_label, " – Gene-Gene Cosine Similarity (LRI)")
+  )
+  dev.off()
+  message("  Heatmap saved to ", heatmap_file)
+# 
+#   # UMAP
+#   mat_genes         <- t(mat)
+#   mat_genes_imputed <- mat_genes
+#   mat_genes_imputed[is.na(mat_genes_imputed)] <- 0
+# 
+#   dist_mat   <- as.dist(1 - sim_mat)
+#   hclust_res <- hclust(dist_mat, method = "complete")
+#   clusters   <- cutree(hclust_res, k = k_clusters)
+# 
+#   set.seed(42)
+#   umap_config             <- umap.defaults
+#   umap_config$n_neighbors <- min(15, nrow(mat_genes_imputed) - 1)
+#   umap_config$min_dist    <- 0.1
+#   umap_config$metric      <- "cosine"
+# 
+#   umap_result <- umap(mat_genes_imputed, config = umap_config)
+# 
+#   umap_df <- data.frame(
+#     Gene    = rownames(mat_genes_imputed),
+#     UMAP1   = umap_result$layout[, 1],
+#     UMAP2   = umap_result$layout[, 2],
+#     n_LRIs  = rowSums(!is.na(mat_genes)),
+#     Cluster = factor(clusters[rownames(mat_genes_imputed)])
+#   )
+# 
+#   p_umap <- ggplot(umap_df, aes(x = UMAP1, y = UMAP2, colour = Cluster, label = Gene)) +
+#     geom_point(size = 3, alpha = 0.9) +
+#     geom_text_repel(size = 2.8, max.overlaps = 40,
+#                     segment.size = 0.2, segment.alpha = 0.5, show.legend = FALSE) +
+#     scale_colour_brewer(palette = "Set1", name = "Cluster") +
+#     labs(
+#       title    = paste0(dataset_label, " – Gene UMAP (LRI LOGFC space)"),
+#       subtitle = paste0("Hierarchical clustering (k = ", k_clusters, ", cosine distance)"),
+#       x = "UMAP 1", y = "UMAP 2"
+#     ) +
+#     theme_bw(base_size = 11) +
+#     theme(plot.title = element_text(face = "bold"))
+# 
+#   umap_file <- file.path(OUTPUT_DIR, paste0(dataset_label, "_lri_gene_umap.png"))
+#   ggsave(umap_file, plot = p_umap, width = 10, height = 8, dpi = 300)
+#   message("  UMAP saved to ", umap_file)
+# 
+#   cluster_df <- umap_df %>%
+#     select(Gene, Cluster, n_LRIs) %>%
+#     arrange(Cluster, Gene)
+#   print(cluster_df)
+# 
+#   cluster_summary <- cluster_df %>%
+#     group_by(Cluster) %>%
+#     summarise(n_genes = n(), genes = paste(sort(Gene), collapse = ", ")) %>%
+#     arrange(Cluster)
+#   print(cluster_summary)
+# 
+#   invisible(list(umap_df = umap_df, clusters = clusters))
+}
+
+# plot_lri_heatmap_umap(Bassez2021_Breast_step4.malignant, "Bassez2021_Breast_step4")
+# plot_lri_heatmap_umap(Qian2020_Breast_step4.malignant,   "Qian2020_Breast_step4")
+# plot_lri_heatmap_umap(Wu2021_Breast_step4.malignant,     "Wu2021_Breast_step4")
+
+# plot_lri_heatmap_umap(Chan2021_Lung_step4.malignant,     "Chan2021_Lung_step4")
+# plot_lri_heatmap_umap(Xing2021_Lung_step4.malignant,     "Xing2021_Lung_step4")
+# plot_lri_heatmap_umap(Laughney2020_Lung_step4.malignant, "Laughney2020_Lung_step4")
+
+plot_lri_heatmap_umap(Kurten_HNSC.malignant, "Kurten_HNSC")
+plot_lri_heatmap_umap(Puram_HNSC.malignant,  "Puram_HNSC")
+plot_lri_heatmap_umap(Choi_HNSC.malignant,   "Choi_HNSC")
+plot_lri_heatmap_umap(Bill_HNSC.malignant,   "Bill_HNSC")
+```
+
+
+# Gene × Dataset UMAP — Combined LRI LogFC Space
+```{r gene-dataset-lri-umap}
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+K_LRI_UMAP  <- 15
+MINDIST_LRI <- 0.1
+
+LRI_UMAP_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
+for (LRI_UMAP_CANCER_FILTER in LRI_UMAP_CANCER_FILTER_OPTIONS) {
+message("\n===== LRI_UMAP_CANCER_FILTER: ", LRI_UMAP_CANCER_FILTER, " =====")
+
+# Full catalogue — filter is applied below
+.lri_all_datasets <- list(
+  Bassez2021_Breast_step4  = Bassez2021_Breast_step4.malignant,
+  Qian2020_Breast_step4    = Qian2020_Breast_step4.malignant,
+  Wu2021_Breast_step4      = Wu2021_Breast_step4.malignant,
+  Chan2021_Lung_step4      = Chan2021_Lung_step4.malignant,
+  Laughney2020_Lung_step4  = Laughney2020_Lung_step4.malignant,
+  Xing2021_Lung_step4      = Xing2021_Lung_step4.malignant,
+  Kurten_HNSC              = Kurten_HNSC.malignant,
+  Puram_HNSC               = Puram_HNSC.malignant,
+  Choi_HNSC                = Choi_HNSC.malignant,
+  Bill_HNSC                = Bill_HNSC.malignant
+)
+.lri_all_cancer <- c(
+  Bassez2021_Breast_step4  = "Breast",
+  Qian2020_Breast_step4    = "Breast",
+  Wu2021_Breast_step4      = "Breast",
+  Chan2021_Lung_step4      = "Lung",
+  Laughney2020_Lung_step4  = "Lung",
+  Xing2021_Lung_step4      = "Lung",
+  Kurten_HNSC              = "H&N",
+  Puram_HNSC               = "H&N",
+  Choi_HNSC                = "H&N",
+  Bill_HNSC                = "H&N"
+)
+.lri_all_colors <- c(
+  Bassez2021_Breast_step4  = "#E41A1C",
+  Qian2020_Breast_step4    = "#FF7F00",
+  Wu2021_Breast_step4      = "#4DAF4A",
+  Chan2021_Lung_step4      = "#377EB8",
+  Laughney2020_Lung_step4  = "#984EA3",
+  Xing2021_Lung_step4      = "#A65628",
+  Kurten_HNSC              = "#F781BF",
+  Puram_HNSC               = "#999999",
+  Choi_HNSC                = "#66C2A5",
+  Bill_HNSC                = "#FC8D62"
+)
+
+# Apply filter
+if (!LRI_UMAP_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
+  stop("LRI_UMAP_CANCER_FILTER must be one of: \"All\", \"Breast\", \"Lung\", \"H&N\"")
+{
+  keep_ds <- if (LRI_UMAP_CANCER_FILTER == "All") names(.lri_all_datasets) else
+               names(.lri_all_datasets)[.lri_all_cancer[names(.lri_all_datasets)] == LRI_UMAP_CANCER_FILTER]
+  LRI_UMAP_DATASETS <- .lri_all_datasets[keep_ds]
+  LRI_UMAP_CANCER   <- .lri_all_cancer[keep_ds]
+  LRI_UMAP_COLORS   <- .lri_all_colors[keep_ds]
+}
+message("LRI UMAP datasets (", LRI_UMAP_CANCER_FILTER, "): ", paste(names(LRI_UMAP_DATASETS), collapse = ", "))
+
+# ── 1. Build per-dataset LRI × Gene LogFC matrices ───────────────────────────
+lri_mats <- lapply(LRI_UMAP_DATASETS, build_lri_logfc_mat)
+
+# ── 2. Union LRI space ────────────────────────────────────────────────────────
+all_lris <- sort(unique(unlist(lapply(lri_mats, rownames))))
+message("Union LRI space: ", length(all_lris), " LRIs")
+
+# ── 3. Build Gene × Dataset feature matrix (rows = Gene_Dataset, cols = LRIs) ─
+gd_rows <- purrr::imap(lri_mats, function(mat, ds) {
+  # mat is LRI × Gene — transpose to Gene × LRI, then align to union LRI space
+  gene_names <- colnames(mat)
+  lapply(gene_names, function(g) {
+    vec <- setNames(rep(NA_real_, length(all_lris)), all_lris)
+    present <- rownames(mat)[!is.na(mat[, g])]
+    vec[present] <- mat[present, g]
+    list(label   = paste0(g, "_", ds),
+         gene    = g,
+         dataset = ds,
+         cancer  = LRI_UMAP_CANCER[[ds]],
+         vec     = vec)
+  })
+}) %>% purrr::flatten()
+
+# Remove rows that are entirely NA (gene absent in that dataset)
+non_empty_gd <- sapply(gd_rows, function(x) any(!is.na(x$vec)))
+gd_rows      <- gd_rows[non_empty_gd]
+message("Gene × Dataset points (non-empty): ", length(gd_rows))
+
+labels_gd_lri  <- sapply(gd_rows, `[[`, "label")
+genes_gd_lri   <- sapply(gd_rows, `[[`, "gene")
+datasets_gd_lri <- sapply(gd_rows, `[[`, "dataset")
+cancer_gd_lri  <- sapply(gd_rows, `[[`, "cancer")
+
+# ── 4. Impute NAs with 0 for UMAP input ───────────────────────────────────────
+feat_mat <- do.call(rbind, lapply(gd_rows, `[[`, "vec"))
+rownames(feat_mat) <- labels_gd_lri
+feat_mat[is.na(feat_mat)] <- 0
+message("Feature matrix: ", nrow(feat_mat), " rows × ", ncol(feat_mat), " LRI columns")
+
+# ── 5. UMAP ───────────────────────────────────────────────────────────────────
+set.seed(SEED)
+k_eff_lri   <- min(K_LRI_UMAP, nrow(feat_mat) - 1)
+umap_lri    <- uwot::umap(feat_mat,
+                           n_neighbors = k_eff_lri,
+                           min_dist    = MINDIST_LRI,
+                           metric      = "cosine")
+
+umap_lri_df <- data.frame(
+  UMAP1   = umap_lri[, 1],
+  UMAP2   = umap_lri[, 2],
+  Label   = labels_gd_lri,
+  Gene    = genes_gd_lri,
+  Dataset = datasets_gd_lri,
+  Cancer  = cancer_gd_lri,
+  stringsAsFactors = FALSE
+)
+
+# ── 6. Plot ───────────────────────────────────────────────────────────────────
+lri_umap_title_suffix <- if (LRI_UMAP_CANCER_FILTER == "All") "All Cancer Types" else
+                           paste0(LRI_UMAP_CANCER_FILTER, " Only")
+lri_umap_out_tag      <- tolower(LRI_UMAP_CANCER_FILTER)   # "all" / "breast" / "lung"
+
+p_lri_umap <- ggplot(umap_lri_df,
+                     aes(x = UMAP1, y = UMAP2,
+                         colour = Dataset, shape = Cancer)) +
+  geom_point(size = 1.8, alpha = 0.5) +
+  ggrepel::geom_text_repel(aes(label = Gene),
+    size = 2.5, max.overlaps = Inf,
+    box.padding = 0.3, segment.size = 0.2, segment.alpha = 0.4,
+    show.legend = FALSE) +
+  scale_colour_manual(values = LRI_UMAP_COLORS) +
+  scale_shape_manual(values = cancer_shapes) +
+  theme_classic(base_size = 13) +
+  labs(
+    title    = paste0("Gene × Dataset UMAP — LRI LogFC Space (",
+                      lri_umap_title_suffix, ")"),
+    subtitle = sprintf("Each point = Gene × Dataset | %d union LRIs | cosine distance",
+                       length(all_lris)),
+    colour = "Dataset", shape = "Cancer Type", x = "UMAP 1", y = "UMAP 2"
+  )
+
+print(p_lri_umap)
+ggsave(file.path(OUTPUT_DIR, sprintf("gene_dataset_lri_umap_%s.png", lri_umap_out_tag)),
+       plot = p_lri_umap, width = 10, height = 7, dpi = 300)
+message("Gene × Dataset LRI UMAP saved (", LRI_UMAP_CANCER_FILTER, ")")
+
+} # end for (LRI_UMAP_CANCER_FILTER in c("All", "Breast", "Lung"))
+# NOTE: umap_lri_df / feat_mat below reflect the last iteration ("Lung").
+
+# Expose for inspection
+# View(umap_lri_df)
+# feat_mat  — raw Gene × Dataset LogFC matrix (imputed NAs = 0)
+```

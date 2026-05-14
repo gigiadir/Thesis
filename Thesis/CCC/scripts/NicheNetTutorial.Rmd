@@ -1,0 +1,70 @@
+---
+title: "NicheNetTutorial"
+output: html_document
+---
+
+#Install Packages
+```{r}
+source("~/AXL-PD1/src/globals/constants.R")
+CODE_DIR_PATH <- "~/Thesis/CellChat"
+install.packages("remotes")
+install.packages("fastmap")
+chat
+if(!requireNamespace("devtools", quietly = TRUE)) {
+  install.packages("devtools") 
+}
+
+devtools::install_github("saeyslab/nichenetr")
+source("~/AXL-PD1/src/requirements.R")
+source(file.path(CODE_DIR_PATH, "utils/Utils.FH.R"))
+source(file.path(CODE_DIR_PATH, "utils/RNA.seq.Utils.R"))
+source(file.path(CODE_DIR_PATH, "utils/Utils.R"))
+
+library(nic)
+library(patchwork)
+library(Seurat)
+```
+#Load Seurat Object
+```{r}
+SC.3CA.Tirosh.Head_And_Neck.Input.Path <- file.path(DATA_DIR_PATH, "SC.3CA.Tirosh/Head_and_Neck")
+
+my.save.RData("Kurten.2021.Seurat", myfolder=SC.3CA.Tirosh.Head_And_Neck.Input.Path, is.load.obj = T)
+```
+
+
+```{r}
+data.input <- GetAssayData(Kurten.2021.Seurat, assay="alra", slot="data")
+meta <- data.frame(group = Kurten.2021.Seurat@meta.data$cell_type)
+rownames(meta) <- colnames(Kurten.2021.Seurat)
+
+cellchat <- createCellChat(object=data.input, meta=meta, group.by = "group")
+# cellchat <- createCellChat(object=Kurten.2021.Seurat, group.by = "ident, assay="alra") Should also work
+
+CellChatDB <- CellChatDB.human
+
+#We can Select the L-R pairs from the selected CellChatDB database for cell-cell communication analysis, we can use subsetDB
+CellChatDB.use <- CellChatDB
+
+#Subsetting the expression data matrix using genes relevant to the selected L-R pairs. An updated CellChatObject is outputed with two slots: DB and data.signaling
+cellchat@DB <- CellChatDB.use
+cellchat <- subsetData(cellchat)
+
+#Identify over-expressed ligands or receptors in each cell group to infer the cell state-specific communication
+cellchat <- identifyOverExpressedGenes(cellchat)
+
+#For each overexpressed ligand tne receptor obatined in the previous step, identify over-expressed L-R interactions if either its associated ligand or receptor is over expressed
+cellchat <- identifyOverExpressedInteractions(cellchat)
+```
+
+# Inference of cell-cell communication networks
+```{r}
+cellchat <- computeCommunProb(cellchat, type="triMean", trim=NULL, raw.use=TRUE)
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+cellchat <- netAnalysis_computeCentrality(cellchat)
+
+netVisual_circle(cellchat@net$count, vertex.weight = T)
+netAnalysis_signalingRole_heatmap(cellchat)
+```
+

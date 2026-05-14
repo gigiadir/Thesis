@@ -1,0 +1,37 @@
+---
+title: "CellChatTutorial"
+output: html_document
+---
+
+#Install Packages
+```{r}
+library(Seurat)
+library(ggplot2)
+```
+
+```{r}
+Correlations.With.AXL.df <- read.csv(file.path(DROPBOX_DIR_PATH, "gigiadir/Figure 1 - Bulk/output/Correlations_With_AXL.csv"))
+Correlations.With.AXL.df$cancer_name <- sub(" \\(n=.*\\)", "", Correlations.With.AXL.df$title)
+Correlations.With.AXL.df$n <- sub(".*\\(n=([0-9]+)\\).*", "\\1", Correlations.With.AXL.df$title)
+
+
+Cancers.N.df <- unique(Correlations.With.AXL.df[, c("cancer_name", "n")])
+
+EMT_group <- c("EMT", "EPITHELIAL_TO_MESENCHYMAL_TRANSITION",
+                  "POSITIVE_REGULATION_OF_EPITHELIAL_TO_MESENCHYMAL_TRANSITION",
+                  "MESENCHYMAL_CELL_MIGRATION")
+Exhaustion_group <- c("PD1", "CTLA4", "TIM3", "LAG3", "TIGIT", "BTLA", "VISTA", "A2AR", 
+                  "KIR", "CD47", "T_cell_exhaustion", "T_cell_cytotoxic_effect")
+TME_Group <- c("T_cells", "T_reg", "NK_cells", "B_cells", "Mast_cells", 
+                  "Macrophages", "CAFs", "Endothelial")
+
+
+EMT_correlations_df <- Correlations.With.AXL.df %>%
+  filter(gene %in% EMT_group & cancer_name != "Sarcoma")
+
+Exhaustion_correlations_df <- Correlations.With.AXL.df %>%
+  filter(gene %in% Exhaustion_group & cancer_name != "Sarcoma" )
+
+TME_correlations_df <- Correlations.With.AXL.df %>%
+  filter(gene %in% TME_Group)```
+

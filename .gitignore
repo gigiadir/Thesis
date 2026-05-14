@@ -88,9 +88,7 @@ CCC-PreProcess/
 
 # Thesis analysis outputs / Dropbox symlinks (with or without trailing slash)
 Thesis/CCC/outputs
-Thesis/CCC/scripts
 Thesis/Figure 1 - Bulk/outputs
-Thesis/Figure 1 - Bulk/scripts
 
 # Root smoke scripts
 /test.sh

@@ -1,0 +1,554 @@
+---
+title: "CellChatTutorial"
+output: html_document
+---
+
+#Install Packages
+```{r}
+source("~/AXL-PD1/src/globals/constants.R")
+CODE_DIR_PATH <- "~/Thesis/CellChat/scripts"
+install.packages("remotes")
+install.packages("fastmap")
+remotes::install_github("sqjin/CellChat")
+source("~/AXL-PD1/src/requirements.R")
+source(file.path(CODE_DIR_PATH, "utils/Utils.FH.R"))
+source(file.path(CODE_DIR_PATH, "utils/RNA.seq.Utils.R"))
+source(file.path(CODE_DIR_PATH, "utils/Utils.R"))
+source(file.path(CODE_DIR_PATH, "utils/CellChat.Utils.R"))
+source(file.path(CODE_DIR_PATH, "utils/Seurat.Utils.R"))
+source(file.path(CODE_DIR_PATH, "utils/my.utils.R"))
+
+library(CellChat)
+library(patchwork)
+library(Seurat)
+
+devtools::install_github("DKFZ-E220/HNSCatlas")
+```
+
+#Load Seurat Objects
+```{r}
+SC.3CA.Tirosh.Head_And_Neck.Input.Path <- file.path(DATA_DIR_PATH, "SC.3CA.Tirosh/Head_and_Neck")
+SC.3CA.Tirosh.BRCA.Input.Path <- file.path(CANCER_DB_DIR_PATH, "SC.3CA.Tirosh/Breast")
+DROPBOX.Seurat.Objects.Dir <- file.path(CANCER_DB_DIR_PATH, "SC.3CA.Tirosh/SeuratObjects_10X")
+
+Bassez.2021.Data.Path <- file.path(SC.3CA.Tirosh.BRCA.Input.Path, "Data_Bassez2021_Breast")
+Bassez.2021.Seurat <- load.and.create.seurat(mtx_path = file.path(Bassez.2021.Data.Path, "Exp_data_UMIcounts.mtx"),
+                                             cells_path = file.path(Bassez.2021.Data.Path, "Cells.csv"),
+                                             genes_path = file.path(Bassez.2021.Data.Path, "Genes.txt"),
+                                             metadata_path = file.path(Bassez.2021.Data.Path, "Meta-data.csv"))
+Bassez.2021.Seurat <- seurat.pipeline(Bassez.2021.Seurat)
+Bassez.2021.Seurat <- RunALRA(Bassez.2021.Seurat)
+
+Lin.2020.Data.Path <- file.path(CANCER_DB_DIR_PATH, "SC.3CA.Tirosh/Pancreas/Data_Lin2020_Pancreas")
+Lin.2020.Seurat <- load.and.create.seurat(mtx_path = file.path(Lin.2020.Data.Path, "Exp_data_UMIcounts.mtx"),
+                                             cells_path = file.path(Lin.2020.Data.Path, "Cells.csv"),
+                                             genes_path = file.path(Lin.2020.Data.Path, "Genes.txt"),
+                                             metadata_path = file.path(Lin.2020.Data.Path, "Meta-data.csv"))
+
+HNSCC.Atlas.Path = file.path(CANCER_DB_DIR_PATH, "SingleCell_Data_Misc/HNSCC_Atlas.rds")
+HNSCC.Atlas <- readRDS(HNSCC.Atlas.Path)
+
+#save for backup
+my.save.RData("Kurten.2021.Seurat", myfolder=SC.3CA.Tirosh.Head_And_Neck.Input.Path, is.load.obj = T)
+my.save.RData("Bassez.2021.Seurat", myfolder=SC.3CA.Tirosh.BRCA.Input.Path, is.load.obj = T)
+my.save.RData("Peng2019_Pancreas.Seurat", myfolder=DROPBOX.Seurat.Objects.Dir, is.load.obj = T)
+my.save.RData("Lin2020_Pancreas.Seurat", myfolder=DROPBOX.Seurat.Objects.Dir, is.load.obj = T)
+
+my.save.RData("GSDB.list.of.lists", myfolder=file.path(DROPBOX_DIR_PATH, "Shared_RDataObjects"), is.load.obj = T)
+
+```
+
+
+
+# Initial Playground with CellChat
+```{r}
+data.input <- GetAssayData(Kurten.2021.Seurat, assay="alra", slot="data")
+meta <- data.frame(group = Kurten.2021.Seurat@meta.data$cell_type)
+rownames(meta) <- colnames(Kurten.2021.Seurat)
+
+cellchat <- createCellChat(object=data.input, meta=meta, group.by = "group")
+# cellchat <- createCellChat(object=Kurten.2021.Seurat, group.by = "ident, assay="alra") Should also work
+
+CellChatDB <- CellChatDB.human
+
+#We can Select the L-R pairs from the selected CellChatDB database for cell-cell communication analysis, we can use subsetDB
+CellChatDB.use <- CellChatDB
+
+#Subsetting the expression data matrix using genes relevant to the selected L-R pairs. An updated CellChatObject is outputed with two slots: DB and data.signaling
+cellchat@DB <- CellChatDB.use
+cellchat <- subsetData(cellchat)
+
+#Identify over-expressed ligands or receptors in each cell group to infer the cell state-specific communication
+cellchat <- identifyOverExpressedGenes(cellchat)
+
+#For each overexpressed ligand tne receptor obatined in the previous step, identify over-expressed L-R interactions if either its associated ligand or receptor is over expressed
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+cellchat <- computeCommunProb(cellchat, type="triMean", trim=NULL, raw.use=TRUE)
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+cellchat <- netAnalysis_computeCentrality(cellchat)
+
+netVisual_circle(cellchat@net$count, vertex.weight = T)
+
+
+
+
+# Plot the heatmap with only those
+netAnalysis_signalingRole_heatmap(cellchat, signaling = c(
+  "WNT",
+  "NOTCH",
+  "TGFb",
+  "EGF",
+  "CXCL",
+  "VEGF",
+  "TNF",
+  "IL6",
+  "MIF",
+  "SPP1"
+))
+
+netVisual_circle(
+  cellchat@net$weight,
+  vertex.weight = TRUE,
+  edge.width.max = 5,
+  arrow.size = 0.4,
+  label.edge = TRUE,
+  sources.use = c("Malignant"),
+  title.name = "Malignant → Other Interactions",
+  margin = 0.05
+)
+```
+
+
+
+
+# Differential CCC - V1
+```{r}
+pathways <- unique(CellChatDB$interaction$pathway_name)
+CHUNK_SIZE <- 20
+pathways_chunks <- split(pathways, ceiling(seq_along(pathways) / CHUNK_SIZE))
+```
+
+## H&N (Kurten 2021) - AXL High vs. Low
+```{r}
+Kurten.2021.Seurat.AXL.Split <- split_seurat_two_groups(
+  Kurten.2021.Seurat,
+  mode="gene_expression",
+  gene="AXL",
+  assay="alra",
+  slot="data",
+  patient_col = "orig.ident",
+  agg_fun = "mean",
+  cutoff_mode = "quantile",
+  q_low = 0.5
+)
+
+High.AXL.CellChat <- create_cell_chat_object(Kurten.2021.Seurat.AXL.Split$group1 ,assay="alra")
+Low.AXL.CellChat <- create_cell_chat_object(Kurten.2021.Seurat.AXL.Split$group2 ,assay="alra")
+High.Low.AXL.merged.CellChat <- mergeCellChat(c(High.AXL.CellChat, Low.AXL.CellChat), add.names = c("High AXL", "Low AXL"))
+
+```
+
+```{r}
+# Ensure output directory exists
+ output_dir <- "../outputs/dCCC/AXL"
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+
+for (i in seq_along(pathways_chunks)) {
+  pathways_chunk <- pathways_chunks[[i]]
+  file_name <- file.path(output_dir, sprintf("Comparison_High_AXL_Low_%02d.png", i))
+
+  # build plot
+  p <- rankNet(
+    High.Low.AXL.merged.CellChat,
+    mode = "comparison",
+    measure = "weight",
+    signaling = pathways_chunk,
+  ) + ggplot2::labs(title = "AXL high vs. low dCCC in signaling pathways")
+
+  # write to file (METHOD A: device + print)
+  png(file_name, width = 2000, height = 1500, res = 300)
+  print(p)                     # <- this actually draws it
+  dev.off()
+}
+```
+## do the same proccess generically
+```{r}
+plot_dccc_chunks(cellchat_merged = TNBC.Luminal.merged.CellChat,
+                 pathway_chunks = pathways_chunks,
+                 dataset_label = "Breast",
+                 comparison_label = "TNBC vs Luminal")
+```
+
+## HNSCC (Kurten 2021) - High vs. Low AXL
+```{r}
+# Key pathways to analyze in Head & Neck (AXL-high vs AXL-low)
+pathways_HNSCC <- c(
+  "GAS",        # GAS6–AXL core TAM signaling (EMT, resistance, immune suppression)
+  "TGFb",       # EMT and Treg/MDSC induction; major axis up in AXL-high
+  "EGF",        # Cross-talk with AXL/EGFR; growth & invasion
+  "IL6",        # STAT3 inflammatory loop; tumor–immune communication
+  "CCL",        # Myeloid recruitment (TAMs, MDSCs)
+  "CXCL",       # Neutrophil and MDSC chemotaxis
+  "PD-L1",      # Immune checkpoint (tumor or myeloid → T/NK cells)
+  "VEGF",       # Angiogenesis and immune exclusion
+  "SPP1",       # Osteopontin; macrophage polarization and invasion
+  "GALECTIN"    # Immunosuppressive and ECM remodeling signal
+)
+
+png("High_AXL_Signaling_Cell-Type.png", width = 2000, height = 1500, res=300)
+netAnalysis_signalingRole_heatmap(High.AXL.CellChat, 
+                                  signaling = pathways_HNSCC,
+                                  title="High AXL Expressing Patients - Signaling Pathways By Cell-Type")
+dev.off()
+
+png("Low_AXL_Signaling_Cell-Type.png", width = 2000, height = 1500, res=300)
+netAnalysis_signalingRole_heatmap(Low.AXL.CellChat, 
+                                  signaling = pathways_HNSCC,
+                                  title="Low AXL Expressing Patients - Signaling Pathways By Cell-Type")
+dev.off()
+
+png("Low_AXL_Cells_Interactions.png", width = 2000, height = 1500, res=300)
+netVisual_circle(
+  Low.AXL.CellChat@net$weight,
+  vertex.weight = TRUE,
+  edge.width.max = 5,
+  arrow.size = 0.4,
+  label.edge = TRUE,
+  sources.use = c("Malignant"),
+  title.name = "Low AXL: Malignant → Other Interactions",
+  margin = 0.05
+)
+dev.off()
+
+
+png("High_AXL_Cells_Interactions.png", width = 2000, height = 1500, res=300)
+netVisual_circle(
+  High.AXL.CellChat@net$weight,
+  vertex.weight = TRUE,
+  edge.width.max = 5,
+  arrow.size = 0.4,
+  label.edge = TRUE,
+  sources.use = c("Malignant"),
+  title.name = "High AXL: Malignant → Other Interactions",
+  margin = 0.05
+)
+dev.off()
+
+compareInteractions(High.Low.AXL.merged.CellChat, measure="count")
+
+png("Comparison_High_AXL_Low.png", width = 2000, height = 1500, res=300)
+rankNet(High.Low.AXL.merged.CellChat, mode="comparison", measure="weight", signaling=pathways_HNSCC)
+def.off()
+```
+
+
+## Breast (Bassez 2021) - TNBC vs. ER+/Luminal
+```{r}
+Bassez.2021.Seurat.BC_Type.Split <- split_seurat_two_groups(
+  Bassez.2021.Seurat,
+  slot="data",
+  mode="metadata",
+  condition_col = "BC_type",
+  patient_col = "sample",
+  group1_values = c("TNBC"),
+  group1_label = "TNBC",
+  group2_values = c("ER+", "HER2+"),
+  group2_label = "ER+/Luminal",
+  majority_threshold = 0.5
+)
+TNBC.CellChat <- create_cell_chat_object(Bassez.2021.Seurat.BC_Type.Split$group1)
+Luminal.CellChat <- create_cell_chat_object(Bassez.2021.Seurat.BC_Type.Split$group2)
+
+pathways_Breast<- c(
+  "EGF",        # EGFR signaling — hallmark of TNBC
+  "NRG",        # NRG1–ERBB3/4 — luminal paracrine growth
+  "IL6",        # Pro-inflammatory, higher in TNBC
+  "CSF",        # Myeloid/macrophage recruitment (CSF1/CSF1R)
+  "CXCL",       # Neutrophil and immune infiltration
+  "SPP1",       # TAM–tumor cross-talk and invasion
+  "PD-L1",      # Immune checkpoint — TNBC enriched
+  "VEGF",       # Angiogenesis and immune suppression
+  "FGF",        # Stromal growth factor; luminal/stromal paracrine loop
+  "TNF"         # Inflammatory cytokine driving NF-κB signaling
+)
+
+
+png("Breast-TNBC-Signaling-By-Cell-Type.png", width = 2000, height = 1500, res=300)
+netAnalysis_signalingRole_heatmap(TNBC.CellChat, 
+                                  signaling = pathways_Breast,
+                                  title="TNBC - Signaling Pathways By Cell-Type")
+
+png("Breast-Luminal-Signaling-By-Cell-Type.png", width = 2000, height = 1500, res=300)
+
+netAnalysis_signalingRole_heatmap(Luminal.CellChat, 
+                                  signaling = pathways_Breast,
+                                  title="Luminal - Signaling Pathways By Cell-Type")
+
+
+TNBC.Luminal.merged.CellChat <- mergeCellChat(c(TNBC.CellChat, Luminal.CellChat), add.names = c("TNBC", "Luminal"))
+compareInteractions(TNBC.Luminal.merged.CellChat, measure="weight")
+compareInteractions(TNBC.Luminal.merged.CellChat, measure="count")
+
+png("Comparison_TNBC_Luminal.png", width = 2000, height = 1500, res=300)
+rankNet(TNBC.Luminal.merged.CellChat, mode="comparison", measure="weight", signaling=pathways_Breast)
+
+
+
+
+```
+
+
+## dCCC pipeline
+```{r}
+res_axl <- dCCC.Pipeline(
+  seurat_obj = Kurten.2021.Seurat,
+  split_args = list(
+    mode = "gene_expression",
+    gene = "AXL",
+    assay = "alra",
+    slot  = "data",
+    patient_col = "orig.ident",
+    agg_fun = "mean",
+    cutoff_mode = "quantile",
+    q_low = 0.5
+  ),
+  cellchat_args = list(assay = "alra", slot = "data"),
+  add_names = c("High AXL", "Low AXL"),
+  pathway_chunks = pathways_chunks,
+  dataset_label = "HNSCC",
+  comparison_label = "AXL high vs low",
+  output_base_dir = "../outputs/dCCC",
+  file_format = "png",
+  width_px = 2000, height_px = 1500, dpi = 300
+)
+```
+
+
+```{r}
+Low.AXL.Pathways.IF <- CellChat.Utils.Get.InfoFlow.Pathway(Low.AXL.CellChat)
+```
+
+
+
+
+# Differential CCC - V2
+```{r}
+HNSCC.Atlas.Patients.Objects <- list()
+HNSCC.Atlas.AXL.Expression <- add_gene_expression_group(HNSCC.Atlas,
+                                                        gene="AXL",
+                                                        assay="RNA",
+                                                        patient_col_options=c("Patient"))
+
+HNSCC.Atlas.Seurat <- HNSCC.Atlas.AXL.Expression$seurat_obj
+HNSCC.Atlas.Patients <- sort(unique(HNSCC.Atlas.Seurat@meta.data$Patient))
+```
+
+```{r}
+
+patients.to.run <- setdiff(HNSCC.Atlas.Patients, names(HNSCC.Atlas.Patients.Objects))
+                           
+for(patient in patients.to.run) {
+  message("Processing patient: ", patient)
+
+  patient_cells <- rownames(HNSCC.Atlas.Seurat@meta.data)[
+    HNSCC.Atlas.Seurat@meta.data$Patient == patient
+  ]
+
+  patient_seurat <- subset(HNSCC.Atlas.Seurat, cells = patient_cells)
+  patient_cellchat <- create_cell_chat_object(patient_seurat,
+                                              assay="RNA",
+                                              cell_type_col = "Cell_Type")
+  patient_info_pathways_vec <- CellChat.Utils.Get.InfoFlow.Pathway(patient_cellchat)
+  patient_info_lr_vec <- CellChat.Utils.Get.InfoFlow.LR(patient_cellchat)
+
+  patient_summary <- list(
+    seurat = patient_seurat,
+    cellchat = patient_cellchat,
+    infoflow_pathways = patient_info_pathways_vec,
+    infoflow_lr = patient_info_lr_vec,
+    n_cells = ncol(patient_seurat),
+    celltype_counts = table(patient_seurat@meta.data$Cell_Type)
+  )
+
+  HNSCC.Atlas.Patients.Objects[[patient]] <- patient_summary
+}
+
+my.save.RData("HNSCC.Atlas.Patients.Objects", myfolder="~/Thesis/CellChat/outputs", is.load.obj = T)
+
+```
+
+
+## Pathways Aggregation
+```{r}
+infoflow_pathway_list <- lapply(
+  HNSCC.Atlas.Patients.Objects,
+  function(x) x$infoflow_pathways
+)
+
+# All pathways (should be your 192)
+all_pathways <- sort(unique(unlist(lapply(infoflow_pathway_list, names))))
+
+# Matrix: rows = pathways, cols = patients
+infoflow_pathway_mat <- sapply(infoflow_pathway_list, function(v) {
+  x <- v[all_pathways]
+  x[is.na(x)] <- 0
+  x
+})
+rownames(infoflow_pathway_mat) <- all_pathways
+
+# Data frame version
+infoflow_pathway_df <- as.data.frame(infoflow_pathway_mat)
+infoflow_pathway_df$pathway <- rownames(infoflow_pathway_df)
+infoflow_pathway_df <- infoflow_pathway_df[, c("pathway", setdiff(colnames(infoflow_pathway_df), "pathway"))]
+
+```
+
+
+## LR Aggregation
+```{r}
+infoflow_lr_list <- lapply(
+    HNSCC.Atlas.Patients.Objects,
+    function(x) x$infoflow_lr
+)
+
+all_lr <- sort(unique(unlist(lapply(infoflow_lr_list, names))))
+
+# Matrix: rows = pathways, cols = patients
+infoflow_lr_mat <- sapply(infoflow_lr_list, function(v) {
+  x <- v[all_lr]
+  x[is.na(x)] <- 0
+  x
+})
+rownames(infoflow_lr_mat) <- all_lr
+infoflow_lr_df <- as.data.frame(infoflow_lr_mat)
+infoflow_lr_df$lr <- rownames(infoflow_lr_df)
+infoflow_lr_df <- infoflow_lr_df[, c("lr", setdiff(colnames(infoflow_lr_df), "lr"))]
+
+```
+
+```{r}
+library(limma)
+
+High.AXL.Patients <- HNSCC.Atlas.AXL.Expression$patient_summary %>%
+  filter(AXL_EXP == "HIGH") %>% select(patient_id) %>% pull(patient_id) %>% intersect(colnames(infoflow_pathway_df))
+Low.AXL.Patients <- HNSCC.Atlas.AXL.Expression$patient_summary %>%
+  filter(AXL_EXP == "LOW") %>% select(patient_id)  %>% pull(patient_id)%>% intersect(colnames(infoflow_pathway_df))
+
+
+fit <- diff.expression.limma(
+  mat.expr = infoflow_pathway_df,
+  is_log_transform = F,
+  is_normalize = T,
+  is_voom = F,
+  robust = F,
+  trend = F,
+  proportion = 0.01,
+  test.cols.numbers = High.AXL.Patients,
+  ctrl.cols.numbers = Low.AXL.Patients
+)
+Pathways.Limma.Fit <- fit
+
+Pathways.Top.Table <- process.topTable(Pathways.Limma.Fit)
+Diff.Pathways <- rownames(Pathways.Top.Table)
+
+LR.Limma.Fit <- diff.expression.limma(
+  mat.expr = infoflow_lr_df,
+  is_log_transform = F,
+  is_normalize = T,
+  is_voom = F,
+  robust = F,
+  trend = F,
+  proportion = 0.01,
+  test.cols.numbers = Low.AXL.Patients,
+  ctrl.cols.numbers = High.AXL.Patients
+)
+
+LR.Top.Table <- process.topTable(LR.Limma.Fit, number = Inf)
+Diff.LR <- rownames(LR.Top.Table)
+```
+
+```{r}
+HNSCC.Atlas.High.AXL.Seurat <- subset(HNSCC.Atlas.Seurat, subset = AXL_EXP == "HIGH")
+HNSCC.Atlas.Low.AXL.Seurat <- subset(HNSCC.Atlas.Seurat, subset = AXL_EXP == "LOW")
+
+
+High.AXL.CellChat <- create_cell_chat_object(HNSCC.Atlas.High.AXL.Seurat ,assay="RNA", cell_type_col = "Cell_Type")
+Low.AXL.CellChat <- create_cell_chat_object(HNSCC.Atlas.Low.AXL.Seurat ,assay="RNA", cell_type_col = "Cell_Type")
+High.Low.AXL.merged.CellChat <- mergeCellChat(c(High.AXL.CellChat, Low.AXL.CellChat), add.names = c("High AXL", "Low AXL"))
+
+rankNet(High.Low.AXL.merged.CellChat, mode="comparison", measure="weight", signaling=Diff.LR)
+```
+
+## Parse CellChatDB 
+```{r}
+library(tidyr)
+
+CellChatDB.Ligands.df <- CellChatDB$interaction %>%
+  select(interaction_name, interaction_name_2) %>%
+  separate(interaction_name_2, into = c("gene", "junk"), sep = " - ", remove = FALSE) %>%
+  mutate(role = "ligand") %>%
+  select(interaction_name, gene, role)
+
+CellChatDB.Receptors.df <- CellChatDB$interaction %>%
+  select(interaction_name, interaction_name_2) %>%
+  mutate(gene = str_extract(interaction_name_2, "(?<=\\().*(?=\\))")) %>%
+  mutate(gene = ifelse(is.na(gene), str_remove(interaction_name_2, ".* - "), gene)) %>%
+  separate_rows(gene, sep = "\\+") %>%
+  mutate(role = "receptor") %>%
+  select(interaction_name, gene, role)
+
+CellChatDB.Genes.Pathways <- bind_rows(CellChatDB.Ligands.df, CellChatDB.Receptors.df) %>%
+  arrange(interaction_name)
+```
+
+## Parse GSDB.list.of.lists$GO.biological.processes.v6.2
+```{r}
+library(dplyr)
+GO.df <- stack(GSDB.list.of.lists$GO.biological.processes.v6.2) %>%
+  rename(gene = values, pathway = ind)
+
+Interaction.Pathways.Map <- CellChatDB.Genes.Pathways %>%
+  inner_join(GO.df, by="gene", relationship = "many-to-many")
+
+Significant.LR.Interactions <- subset(LR.Top.Table, minus.log.q.val > 0.60)
+
+CellChat.GO.Aggregation <- Interaction.Pathways.Map %>%
+  inner_join(Significant.LR.Interactions, by = c("interaction_name" = "Gene"), relationship = "many-to-many") %>%
+  group_by(pathway) %>%
+  summarize(
+    n_interactions = n_distinct(interaction_name),
+    sum_logFC = sum(logFC, na.rm = TRUE),
+    genes_involved = paste(unique(gene), collapse = ", "),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(sum_logFC))
+
+my.save.RData("CellChat.GO.Aggregation", file.path("~/Thesis/CellChat/outputs/dCCC"), is.load.obj = T)
+```
+
+
+
+# Differential CCC - V3 (POC)
+```{r}
+V3.Pipeline.Config <- list(
+  #Seurat Parsing Config
+  n.var.genes = 5000
+)
+DefaultAssay(HNSCC.Atlas) <- "RNA"
+
+HNSCC.Atlas.Malignant.Seurat <- subset(HNSCC.Atlas, Cell_Type == "Epithelial")
+HNSCC.Atlas.Malignant.Seurat <- FindVariableFeatures(HNSCC.Atlas.Malignant.Seurat,
+                                                     nfeatures = V3.Pipeline.Config$n.var.genes)
+HNSCC.Atlas.Malignant.Top.5000.Genes <- VariableFeatures(HNSCC.Atlas.Malignant.Seurat)
+
+
+my.save.RData("Bassez.2021.Seurat", myfolder=file.path(DROPBOX_DIR_PATH, "Cancer_DB/SC.3CA.Tirosh/Breast"), is.load.obj = T)
+Bassez.2021.Malignant.Seurat <- subset(Bassez.2021.Seurat, cell_type == "Malignant")
+Bassez.2021.Malignant.Seurat <- FindVariableFeatures(Bassez.2021.Malignant.Seurat,
+                                                     nfeatures = V3.Pipeline.Config$n.var.genes)
+Bassez.2021.Malignant.Top.5000.Genes <- VariableFeatures(Bassez.2021.Malignant.Seurat)
+```
+
