@@ -4,6 +4,16 @@
 *.rds
 *.RDS
 
+# R session / local preferences
+.Rhistory
+.Rprofile
+.Renviron
+.Rapp.history
+
+# Claude (local state; not project source)
+.claude/
+.claude.json
+
 # Logs
 *.log
 logs/
@@ -19,19 +29,74 @@ logs/
 *.eps
 *.html
 
-# Environments and tooling (not project source)
+# Environments and IDE (not project source)
 .conda/
 .cursor-server/
 .cursor/
 .cache/
 .local/
-.claude/
 .config/
 .vscode/
 .vscode-R/
 
 # R user library under this tree
 R/
+
+# Shell, editor, and personal dotfiles (do not version)
+.bash_history
+.bash_profile
+.bashrc
+.cshrc
+.sh_history
+.radian_history
+.viminfo
+.lesshst
+.gitconfig
+.sleep.sh.e
+.sleep.sh.o
+
+# Secrets / machine-local
+.ssh/
+.git-credentials
+.netrc
+
+# Kubernetes
+.kube/
+
+# RStudio per-user project state (safe to ignore)
+.Rproj.user/
+
+# Bundles / manifests / large archives
+*.tar.gz
+MANIFEST.txt
+
+# Analysis outputs and vendored CIBERSORT package trees
+**/output/
+**/outputs/
+**/CIBERSORT_package/
+**/CIBERSORT-Results.txt
+
+# Local scratch / object lists
+Scripts/Missing-scDiffCom-Objects
+
+# Conda export dirs (recreate from yaml if needed)
+conda-environments/
+
+# Large / local preprocessing tree (not tracked as code here)
+CCC-PreProcess/
+
+# Thesis analysis outputs / Dropbox symlinks (with or without trailing slash)
+Thesis/CCC/outputs
+Thesis/CCC/scripts
+Thesis/Figure 1 - Bulk/outputs
+Thesis/Figure 1 - Bulk/scripts
+
+# Root smoke scripts
+/test.sh
+
+# Scripts: shell runners and env export (add exceptions with ! if you need one)
+Scripts/*.sh
+Scripts/environment.yaml
 
 # OS / misc
 .DS_Store
