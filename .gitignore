@@ -65,6 +65,7 @@ R/
 
 # RStudio per-user project state (safe to ignore)
 .Rproj.user/
+*.Rproj
 
 # Bundles / manifests / large archives
 *.tar.gz
