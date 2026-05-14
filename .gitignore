@@ -93,10 +93,6 @@ Thesis/Figure 1 - Bulk/outputs
 # Root smoke scripts
 /test.sh
 
-# Scripts: shell runners and env export (add exceptions with ! if you need one)
-Scripts/*.sh
-Scripts/environment.yaml
-
 # OS / misc
 .DS_Store
 *.swp

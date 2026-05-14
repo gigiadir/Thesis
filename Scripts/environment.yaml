@@ -1,0 +1,20 @@
+name: scdiffcom_env
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - r-base>=4.2
+  - r-optparse
+  - r-seurat
+  - r-dplyr
+  - r-miceadds
+  - r-future
+  - r-biocmanager
+  - r-devtools
+  - bioconductor-delayedarray
+# After creating this environment, install scDiffCom from R-universe:
+#
+#   conda activate scdiffcom_env
+#   Rscript -e 'devtools::install_github("CyrilLagger/scDiffCom")'
+
