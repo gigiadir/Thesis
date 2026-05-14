@@ -1,0 +1,27 @@
+---
+title: "CellChat"
+output: html_document
+---
+
+##Setting Up Libraries, globals and sources
+```{r}
+  source(file.path("globals/constants.R"))
+  DATA_DIR_PATH <- file.path(BASE_DIR_PATH, "data")
+  
+  
+  source(file.path(BASE_DIR_PATH, "src/requirements.R"))
+
+  for(file in list.files(path = file.path(BASE_DIR_PATH, "src/utils") ,full.names = TRUE)) {
+    source(file)
+  }
+  
+  library(Seurat)
+  library(SeuratWrappers)
+  library(dplyr)
+  library(tidyr)
+  library(tibble)
+  library(miceadds)
+  library(TCGAbiolinks)
+  library(ggplot2)
+```
+

@@ -1,0 +1,651 @@
+---
+title: "Figure1"
+output: html_document
+date: "2024-11-06"
+editor_options: 
+  chunk_output_type: console
+---
+
+##Setting Up Libraries, globals and sources
+```{r}
+source("~/Documents/BGU/AXL-PD1/src/globals/constants.R")
+source("/Users/adirgigi/Library/CloudStorage/Dropbox/Shared_Code/R_Generic_Code/Utils.R")
+source("/Users/adirgigi/Library/CloudStorage/Dropbox/Shared_Code/R_Generic_Code/RNA.seq.Utils.R")
+
+load("/Users/adirgigi/Library/CloudStorage/Dropbox/Shared_RDataObjects/GSDB.list.of.lists.RData")
+load("/Users/adirgigi/Library/CloudStorage/Dropbox/Shared_RDataObjects/GSDB.list.inclusive.RData")
+load("/Users/adirgigi/Library/CloudStorage/Dropbox/Shared_RDataObjects/TCGAbiolinks.list.RData")
+
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install(c("cBioPortalData", "AnVIL", "org.Hs.eg.db", "scran"))
+install.packages(c("survival", "survminer", "dplyr", "tidyr", "gt", "tibble"))
+
+# Bioconductor packages
+library(cBioPortalData)  
+library(AnVIL)          
+library(org.Hs.eg.db)    
+library(AnnotationDbi) 
+library(scran) 
+
+# CRAN packages
+library(survival)    
+library(survminer)    
+library(dplyr)         
+library(tidyr)     
+library(gt)      
+library(tibble)       
+```
+
+
+```{r}
+# Create counts from "mrna_seq_v2_rsem" assay
+create.counts.from.mrna_seq_v2_rsem <- function(study_data) {
+  study_assay <- assay(study_data, "mrna_seq_v2_rsem")
+  study_counts <- round(study_assay)
+  study_clinical_data <- colData(study_data)
+
+  # Normalize counts matrix
+  study_counts <- my.log.normalize(study_counts)
+  
+  patient_barcodes_raw <- colnames(study_counts)
+  patient_barcodes <- substr(patient_barcodes_raw, 1, nchar(patient_barcodes_raw) - 3)
+  colnames(study_counts) <- patient_barcodes
+  
+  return (list(counts = study_counts, clinical_data = study_clinical_data))
+}
+
+# Create counts from "mrna_seq_read_counts" assay
+create.counts.from.mrna_seq_read_counts <- function(study_data) {
+  study_counts <- assay(study_data, "mrna_seq_read_counts")
+  study_clinical_data <- colData(study_data)
+
+  # Map Entrez IDs to gene symbols
+  entrez_ids <- rownames(study_counts)
+  gene_symbols <- mapIds(org.Hs.eg.db,
+                         keys = entrez_ids,
+                         column = "SYMBOL",
+                         keytype = "ENTREZID",
+                         multiVals = "first")
+  rownames(study_counts) <- ifelse(!is.na(gene_symbols), gene_symbols, entrez_ids)
+
+  # Normalize counts matrix
+  study_counts <- my.log.normalize(study_counts)
+  
+  patient_barcodes_raw <- colnames(study_counts)
+  patient_barcodes <- substr(patient_barcodes_raw, 1, nchar(patient_barcodes_raw) - 4)
+  colnames(study_counts) <- patient_barcodes
+  
+  return (list(counts = study_counts, clinical_data = study_clinical_data))
+}
+
+
+# Main function to get counts and clinical data
+get.TCGA.study.counts.and.clinical.data <- function(study_id) {
+  downloadStudy(study_id, use_cache = TRUE)
+  study_data <- cBioDataPack(study_id, ask = FALSE)
+  assays_names <- names(assays(study_data))
+
+  if ("mrna_seq_v2_rsem" %in% assays_names) {
+    data <- create.counts.from.mrna_seq_v2_rsem(study_data)
+  } else if ("mrna_seq_read_counts" %in% assays_names) {
+    data <- create.counts.from.mrna_seq_read_counts(study_data)
+  } else {
+    stop("No appropriate assay found in the study data.")
+  }
+
+  return(data)  # Data contains both counts and clinical data
+}
+```
+
+##Bulk - Set Dataset For Each Cancer
+```{r}
+
+cbio <- cBioPortal()
+studies <- getStudies(cbio)
+
+# Define the TCGA codes
+TCGA.Codes <- c(
+  "ACC", "BRCA", "BLCA", "CESC", "CHOL", 
+                "COAD", "ESCA", "GBM", "HNSC", "KICH", 
+                "KIRC", "KIRP", "LGG", "LIHC", "LUAD", 
+                "LUSC", "PAAD", "PRAD", "READ", "SKCM", 
+                "SARC", "STAD", "THCA", "UCEC", "UCS", 
+                "UVM")
+Cancer.Names <- c("Adrenal", "Breast", "Bladder", "Cervical", 
+                  "Cholangiocarcinoma", "Colon", "Esophagus", "Glioblastoma", 
+                  "Head and Neck", "Kidney Chromophobe", "Kidney Clear Cell", 
+                  "Kidney Papillary", "Lower Grade Glioma", "Liver", 
+                  "Lung Adenocarcinoma", "Lung Squamous", "Pancreas", 
+                  "Prostate", "Rectum", "Skin Melanoma", 
+                  "Sarcoma", "Stomach", "Thyroid", 
+                  "Endometrial", "Uterine Carcinosarcoma", "Uveal Melanoma")
+
+TCGA.Code.To.Name.Mapper <- setNames(Cancer.Names, TCGA.Codes)
+  
+# Create a list with studyId for each code
+TCGA.Selected.Datasets <- lapply(TCGA.Codes, function(code) {
+  study_id <- paste0(tolower(code), "_tcga_gdc")
+  if (study_id %in% studies$studyId) {
+      list(studyId = study_id)
+  } else {
+    list(studyId = paste0(tolower(code), "_tcga_pan_can_atlas_2018"))
+  }
+})
+
+# Manual Fixes
+TCGA.Selected.Datasets[["SARC"]]$studyId <- "sarc_tcga"
+
+# Set the names of the list to the code names
+names(TCGA.Selected.Datasets) <- TCGA.Codes
+
+# Iterate over each element in the list to add counts
+for (code in names(TCGA.Selected.Datasets)) {
+  study_id <- TCGA.Selected.Datasets[[code]]$studyId
+  res <- get.TCGA.study.counts.and.clinical.data(study_id)
+  # Apply the get.TCGA.study.counts function and store the result in the list
+  TCGA.Selected.Datasets[[code]]$counts <- res$counts
+  TCGA.Selected.Datasets[[code]]$clinical_data <- res$clinical_data
+  TCGA.Selected.Datasets[[code]]$df <- as.data.frame(t(res$counts))
+  TCGA.Selected.Datasets[[code]]$cancer_name <- TCGA.Code.To.Name.Mapper[[code]]
+  TCGA.Selected.Datasets[[code]]$n_patients <- dim(as.data.frame(t(res$counts)))[1]
+}
+ 
+```
+
+# HNSC - Remove HPV Positive
+```{r}
+HNSC_CODE <- "HNSC"
+hnsc.clinical.data <- TCGAbiolinks.list$clinical.BCRtab.HNSC.all$clinical_patient_hnsc
+
+patient_barcodes_to_remove <- hnsc.clinical.data$bcr_patient_barcode[
+  hnsc.clinical.data$hpv_status_ish == "Positive" | hnsc.clinical.data$hpv_status_p16 == "Positive"
+  ]
+
+columns_to_keep <- !(colnames(TCGA.Selected.Datasets[[HNSC_CODE]]$counts) %in% patient_barcodes_to_remove)
+TCGA.Selected.Datasets[[HNSC_CODE]]$counts <- TCGA.Selected.Datasets[[HNSC_CODE]]$counts[, columns_to_keep]
+TCGA.Selected.Datasets[[HNSC_CODE]]$df <- as.data.frame(t(TCGA.Selected.Datasets[[HNSC_CODE]]$counts))
+TCGA.Selected.Datasets[[HNSC_CODE]]$n_patients <- dim(TCGA.Selected.Datasets[[HNSC_CODE]]$df)[1]
+
+```
+
+# Save Environemnt
+```{r}
+  ENVIRONEMNT_FILE_NAME <- "Figure-1-Environment.RData"
+  save.image(ENVIRONEMNT_FILE_NAME)
+
+```
+
+```{r}
+Correlations.With.AXL <- list()
+```
+
+#Signatures to compare with AXL
+```{r}
+Signatures.to.compare.with.AXL <- list(
+  EMT = GSDB.list.of.lists$h.Hallmark.Gene.Sets$HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION,
+  EPITHELIAL_MESENCHYMAL_CELL_SIGNALING=GSDB.list.of.lists$c5_GO.Biological.Process$GOBP_EPITHELIAL_MESENCHYMAL_CELL_SIGNALING,
+  EPITHELIAL_TO_MESENCHYMAL_TRANSITION=GSDB.list.of.lists$c5_GO.Biological.Process$GOBP_EPITHELIAL_TO_MESENCHYMAL_TRANSITION,
+  POSITIVE_REGULATION_OF_EPITHELIAL_TO_MESENCHYMAL_TRANSITION=GSDB.list.of.lists$c5_GO.Biological.Process$GOBP_POSITIVE_REGULATION_OF_EPITHELIAL_TO_MESENCHYMAL_TRANSITION,
+  MESENCHYMAL_CELL_MIGRATION=GSDB.list.of.lists$c5_GO.Biological.Process$GOBP_MESENCHYMAL_CELL_MIGRATION,
+  
+  CD8 = c("CD8A", "CD8B"),
+  CD3 = c("CD3D", "CD3E", "CD3G"),
+  
+  T_cell_exhaustion = GSDB.list.inclusive$Tirosh.T_Cell_exhaustion,
+  T_cell_cytotoxic_effect= GSDB.list.inclusive$IPS.28052254.effector.cells,
+  
+  T_cells = GSDB.list.of.lists$cell.types.main$T.cells,
+  T_CD8 = GSDB.list.of.lists$cell.types.main$T.CD8,
+  T_CD4 = GSDB.list.of.lists$cell.types.main$T.CD4,
+  T_reg = GSDB.list.of.lists$cell.types.main$Treg,
+  NK_cells =  GSDB.list.of.lists$cell.types.main$NK,
+
+  B_cells = GSDB.list.of.lists$cell.types.main$B.cells,
+  Mast_cells = GSDB.list.of.lists$cell.types.main$Mast.Cell,
+  Macrophages = GSDB.list.of.lists$cell.types.main$Macrophages,
+
+  CAFs = GSDB.list.of.lists$cell.types.main$CAFs,
+  Endothelial = GSDB.list.of.lists$cell.types.main$Endothelial
+)
+
+
+for(code in names(TCGA.Selected.Datasets)) {
+  study <- TCGA.Selected.Datasets[[code]]
+  study_counts <- study$counts
+  
+  signature_correlations <- list()
+  cat(sprintf("Calculating signature correlations for dataset %s\n", code))
+  for (signature_name in names(Signatures.to.compare.with.AXL)) {
+    cat(sprintf("Start - Signature %s\n", signature_name))
+    signature_vector <- calc.Signatures.AUC(df = study_counts,
+                                            GSDB.list = Signatures.to.compare.with.AXL[[signature_name]],
+                                            top.n.percent.of.genes.in.ranking.used = ifelse(length(Signatures.to.compare.with.AXL[[signature_name]]) >= 15, 20, 100))
+    
+    axl_expression <- matrix(study_counts["AXL", ], nrow = 1)
+
+    signature_correlation_with_axl <- suppressWarnings(
+      cor.test(t(signature_vector), t(axl_expression), method = "spearman")
+    )
+      
+    rho_value <- signature_correlation_with_axl$estimate
+    p_value <- signature_correlation_with_axl$p.value
+    
+    if(is.na(rho_value) || is.na(p_value)) {
+      cat(sprintf("FOR DATASET %s, signature %s we got NA\n", code, signature_name))
+      if(var(t(signature_vector)) == 0) {
+        cat(sprintf("signature_vector is constant\n"))
+      } else if(var(t(axl_expression)) == 0) {
+        cat(sprintf("axl_expression is constant\n"))
+      }
+      
+    }
+    signature_correlations[[signature_name]] <- c(rho_value, p = p_value)
+  }
+  
+ Correlations.With.AXL[[code]] <- signature_correlations
+}
+
+```
+
+# Compare Signatures Correlations of CD8 and CD3 with the actual genes
+```{r}
+calculate_and_plot_correlations <- function(gene_set, signature_name, signature_data, tcga_datasets) {
+  correlations <- list()
+  
+  for (code in names(tcga_datasets)) {
+    study <- tcga_datasets[[code]]
+    study_counts <- study$counts
+    
+    study_correlations <- list()
+    
+    # Calculate Signature Vector for the dataset
+    Signature.Vector <- calc.Signatures.AUC(
+      df = study_counts,
+      GSDB = signature_data[[signature_name]],
+      top.n.percent.of.genes.in.ranking.used = 100
+    )
+    
+    # Calculate correlations for each gene in the gene set
+    for (gene_name in names(gene_set)) {
+      gene_expression <- matrix(study_counts[gene_set[[gene_name]], ], nrow = 1)
+      correlation <- suppressWarnings(
+        cor.test(t(gene_expression), t(Signature.Vector), method = "spearman")
+      )
+      
+      rho_value <- correlation$estimate
+      p_value <- correlation$p.value
+      
+      # Store results
+      corr_list <- list(rho = rho_value[["rho"]], p_value = p_value)
+      study_correlations[[paste0(gene_name, "_VS_", signature_name, "_Sig")]] <- corr_list
+    }
+    
+    correlations[[code]] <- study_correlations
+  }
+  
+  # Convert correlations list to a data frame for plotting
+  plot_data <- do.call(rbind, lapply(names(correlations), function(cancer) {
+    data.frame(
+      Cancer = cancer,
+      Type = names(gene_set),
+      Rho = sapply(names(gene_set), function(gene_name) {
+        correlations[[cancer]][[paste0(gene_name, "_VS_", signature_name, "_Sig")]]$rho
+      })
+    )
+  }))
+  
+  # Plot the correlations
+  ggplot(plot_data, aes(x = Cancer, y = Rho, group = Type, color = Type)) +
+    geom_point(size = 3, alpha = 0.7) +  # Uniform point size
+    geom_line(size = 1) +                # Lines connecting points
+    scale_color_manual(values = c("CD8A" = "blue", "CD8B" = "red", "CD3E" = "green", 
+                                  "CD3D" = "orange", "CD3G" = "purple")) +
+    labs(title = paste(signature_name, "Correlations with Signature"),
+         x = "Cancer Code",
+         y = "Rho Value") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),  # Centered title
+      axis.text.x = element_text(angle = 45, hjust = 1))     # Slanted X-axis labels
+  
+  return (correlations)
+}
+
+# Example usage:
+
+# Define gene sets
+CD8.Genes <- list(CD8A = "CD8A", CD8B = "CD8B")
+CD3.Genes <- list(CD3D = "CD3D", CD3E = "CD3E", CD3G = "CD3G")
+
+# Run the function for CD8
+CD8.Correlations.With.Sig <- calculate_and_plot_correlations(
+  gene_set = CD8.Genes,
+  signature_name = "CD8",
+  signature_data = Signatures.to.compare.with.AXL,
+  tcga_datasets = TCGA.Selected.Datasets
+)
+
+# Run the function for CD3
+CD3.Correlations.With.Sig <- calculate_and_plot_correlations(
+  gene_set = CD3.Genes,
+  signature_name = "CD3",
+  signature_data = Signatures.to.compare.with.AXL,
+  tcga_datasets = TCGA.Selected.Datasets
+)
+```
+
+#Single Genes to compare with AXL
+```{r}
+Genes.to.compare.with.AXL = list(
+  PD1 = "PDCD1",
+  PD1 = "SLEB2",
+  CTLA4 = "CTLA4",
+  CTLA4 = "IDDM12",
+  TIM3 = "HAVCR2",
+  LAG3 = "LAG3",
+  TIGIT = "TIGIT",
+  BTLA = "BTLA",
+  VISTA = "VSIR",
+  VISTA = "C10orf54",
+  A2AR = "ADORA2A",
+  KIR = "KIR3DL1",
+  CD47 = "CD47"
+)
+
+Pairings.with.AXL <- list(
+  Genes = unlist(Genes.to.compare.with.AXL),
+  CompareWith = rep("AXL", length(Genes.to.compare.with.AXL))
+)
+
+
+for(code in names(TCGA.Selected.Datasets)) {
+  study <- TCGA.Selected.Datasets[[code]]
+  study_counts <- study$counts
+  
+  correlate_pairs_result <- correlatePairs(study_counts, pairings=Pairings.with.AXL)
+  genes_correlations <- list()
+  
+  cat(sprintf("Calculating genes correlations for dataset %s\n", code))
+
+  for (i in 1:nrow(correlate_pairs_result)) {
+      gene_name <- correlate_pairs_result[i, "gene1"]
+      p_value <- correlate_pairs_result[i, "p.value"]
+      rho_value <- correlate_pairs_result[i, "rho"]
+      
+      if (is.na(p_value) || is.na(rho_value)) { next }
+      gene_name <- names(Genes.to.compare.with.AXL)[match(gene_name, Genes.to.compare.with.AXL)]
+      genes_correlations[[gene_name]] <- c(rho = rho_value, p = p_value)
+    }
+  
+  Correlations.With.AXL[[code]] <- c(Correlations.With.AXL[[code]], genes_correlations) 
+}
+
+```
+
+
+# Create Figure Table
+```{r}
+Cancer.Names <- c("Adrenal", "Breast", "Bladder", "Cervical", 
+                  "Cholangiocarcinoma", "Colon", "Esophagus", "Glioblastoma", 
+                  "Head and Neck", "Kidney Chromophobe", "Kidney Clear Cell", 
+                  "Kidney Papillary", "Lower Grade Glioma", "Liver", 
+                  "Lung Adenocarcinoma", "Lung Squamous", "Pancreas", 
+                  "Prostate", "Rectum", "Skin Melanoma", 
+                  "Sarcoma", "Stomach", "Thyroid", 
+                  "Endometrial", "Uterine Carcinosarcoma", "Uveal Melanoma")
+TCGA.Code.To.Name.Mapper <- setNames(Cancer.Names, TCGA.Codes)
+
+Correlations.With.AXL.df <- bind_rows(lapply(names(Correlations.With.AXL), function(cancer_code) {
+  data.frame(
+    title = paste0(TCGA.Selected.Datasets[[cancer_code]]$cancer_name, " (n=", TCGA.Selected.Datasets[[cancer_code]]$n_patients, ")"),
+    gene = names(Correlations.With.AXL[[cancer_code]]),
+    do.call(rbind, lapply(Correlations.With.AXL[[cancer_code]], function(x) {
+      data.frame(rho = x[["rho"]], p = x[["p"]])
+    }))
+  )
+}), .id = NULL)
+
+gene_order <- c(
+  "EMT", "EPITHELIAL_MESENCHYMAL_CELL_SIGNALING", "EPITHELIAL_TO_MESENCHYMAL_TRANSITION",
+  "POSITIVE_REGULATION_OF_EPITHELIAL_TO_MESENCHYMAL_TRANSITION", "MESENCHYMAL_CELL_MIGRATION",
+  "PD1", "CTLA4", "TIM3", "LAG3", "TIGIT", "BTLA", "VISTA", "A2AR", "KIR", "CD47", "CD3", "CD8",
+  "T_cell_cytotoxic_effect", "T_cell_exhaustion",
+  "T_cells", "T_CD8", "T_CD4", "T_reg", "NK_cells", "B_cells", "Mast_cells", 
+  "Macrophages", "CAFs", "Endothelial"
+)
+
+Correlations.With.AXL.df <- Correlations.With.AXL.df %>%
+  dplyr::group_by(title) %>%
+  dplyr::mutate(total_rho = sum(rho, na.rm = TRUE)) %>%  # Calculate the sum of rho for each cancer type
+    dplyr::ungroup() %>%
+    dplyr::arrange(desc(total_rho))  # Order by total_rho in descending order
+
+
+Correlations.With.AXL.df <- Correlations.With.AXL.df %>%
+  mutate(p = ifelse(p > 0.05, -1, p)) %>%  # Replace not significiat values with -1 (invalid value)
+  mutate(p = ifelse(p == 0, 1e-206, p)) %>%  # Replace 0 p-values with a small value
+  mutate(rho = ifelse(rho < 0.1, 0, rho)) %>%  # Replace not significiat values with -1 (invalid value)
+  mutate(p = ifelse(rho == 0, -1, p)) %>%  # Replace not significiat values with -1 (invalid value)
+  mutate(scaled_p = -log10(p))  # Scale p-values (e.g., -log10)
+
+write.csv(Correlations.With.AXL.df, file.path(OUTPUT_DIR_PATH, "Correlations_With_AXL.csv"), row.names = FALSE)
+```
+
+#Dot Plot
+```{r}
+library(Seurat)
+library(ggplot2)
+
+Correlations.With.AXL.df <- read.csv("~/Thesis/Figure 1 - Bulk/output/Correlations_With_AXL.csv")
+
+# SET OUTPUT DIR PATH
+OUTPUT_DIR_PATH <- "~/Thesis/Figure 1 - Bulk/output"
+
+EMT_group <- c("EMT", "EPITHELIAL_TO_MESENCHYMAL_TRANSITION",
+                  "POSITIVE_REGULATION_OF_EPITHELIAL_TO_MESENCHYMAL_TRANSITION",
+                  "MESENCHYMAL_CELL_MIGRATION")
+Exhaustion_group <- c("PD1", "CTLA4", "TIM3", "LAG3", "TIGIT", "BTLA", "VISTA", "A2AR", "CD8",
+                  "KIR", "CD47", "T_cell_exhaustion", "T_cell_cytotoxic_effect")
+MTE_group <- c("T_cells", "T_reg", "NK_cells", "B_cells", "Mast_cells", 
+                  "Macrophages", "CAFs", "Endothelial")
+
+combined_order <- c(EMT_group, Exhaustion_group, MTE_group)
+
+EMT_correlations_df <- Correlations.With.AXL.df %>%
+  filter(gene %in% EMT_group)
+
+Exhaustion_correlations_df <- Correlations.With.AXL.df %>%
+  filter(gene %in% Exhaustion_group)
+
+MTE_correlations_df <- Correlations.With.AXL.df %>%
+  filter(gene %in% MTE_group)
+
+combined_groups_df <- Correlations.With.AXL.df %>% filter(gene %in% combined_order)
+combined_groups_df$gene_factor <- factor(
+  combined_groups_df$gene,
+  levels = combined_order
+)
+
+combined_groups_df <- combined_groups_df[order(
+  -combined_groups_df$total_rho, # Descending order by total_rho
+  combined_groups_df$gene_factor # Order by gene factor levels
+), ]
+
+
+# Create a DotPlot object
+EMT_dotplot <- ggplot(EMT_correlations_df, aes(x = gene, y = reorder(title, total_rho))) +
+  geom_point(aes(size = scaled_p, color = rho)) +
+  scale_color_gradient(low = "gray", high = "red", limits=c(0,1)) +  # Adjust the gradient as needed
+  theme_minimal() +
+  labs(x = "Signatures", y = "Cancer Types", color = "Rho", size = "-log10(p)") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
+    axis.text = element_text(size = 9),
+    axis.title = element_text(size = 12)
+  )
+
+Exhaustion_dotplot <- ggplot(Exhaustion_correlations_df, aes(x = gene, y = reorder(title, total_rho))) +
+  geom_point(aes(size = scaled_p, color = rho)) +
+  scale_color_gradient(low = "gray", high = "red",  limits=c(0,1)) +  # Adjust the gradient as needed
+  theme_minimal() +
+  labs(x = "Signatures", y = "Cancer Types", color = "Rho", size = "-log10(p)") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 12)
+  )
+
+MTE_dotplot <- ggplot(MTE_correlations_df, aes(x = gene, y = reorder(title, total_rho))) +
+  geom_point(aes(size = scaled_p, color = rho)) +
+  scale_color_gradient(low = "gray", high = "red",  limits=c(0,1)) +  # Adjust the gradient as needed
+  theme_minimal() +
+  labs(x = "Signatures", y = "Cancer Types", color = "Rho", size = "-log10(p)") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 12)
+  )
+
+combined_groups_df$gene <- factor(combined_groups_df$gene, levels = unique(combined_groups_df$gene))
+
+combined_dotplot <- ggplot(combined_groups_df, aes(x = gene, y = reorder(title, total_rho))) +
+  geom_point(aes(size = scaled_p, color = rho)) +
+  scale_color_gradient(low = "gray", high = "red",  limits=c(0,1)) +  # Adjust the gradient as needed
+  theme_minimal() +
+  labs(x = "Signatures", y = "Cancer Types", color = "Rho", size = "-log10(p)") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
+    axis.text = element_text(size = 8),
+    axis.title = element_text(size = 12)
+  )
+
+ggsave("EMT_dotplot.pdf", EMT_dotplot, path=OUTPUT_DIR_PATH, device="pdf", scale=0.8, width=16, height=9)
+ggsave("Exhaustion_dotplot.pdf", Exhaustion_dotplot, path=OUTPUT_DIR_PATH, device="pdf", scale=0.8, width=16, height=9)
+ggsave("MTE_dotplot.pdf", MTE_dotplot, path=OUTPUT_DIR_PATH, device="pdf", scale=0.8, width=16, height=9)
+ggsave("combined_dotplot.png", combined_dotplot, path=OUTPUT_DIR_PATH, device="png", scale=0.8, width=20, height=12)
+
+```
+
+```{r}
+ggplot(data = gsea.2plot, aes(x = NES, y = reorder(y.axsis.name,NES), 
+                              color = minus.log10.pval, size = size)) + 
+  geom_point() +
+  scale_color_gradient(high = "red", low = "blue") +
+  theme_bw() +
+  theme(axis.text.y = element_text(face = "bold" , size = 10), axis.text.x = element_text(face="bold", size = 10))
+ylab("") +
+  xlab("") +
+  ggtitle("GSEA")
+ggsave(filename = "GSEA.ggplot.PDF", device="pdf",
+       scale = 0.58 , width = 10 ,  path = out.folder) # scale = 1 , width = 6
+```
+
+#HeatMap
+```{r}
+rho_df <- bind_rows(
+  lapply(names(Correlations.With.AXL), function(code) {
+    tibble(
+      Code = code,
+      Gene = names(Correlations.With.AXL[[code]]),
+      Rho = sapply(Correlations.With.AXL[[code]], function(x) x[["rho"]])
+    )
+  })
+)
+
+rho_matrix <- rho_df %>%
+  pivot_wider(names_from = Gene, values_from = Rho) %>%
+  column_to_rownames("Code") %>% # Set cancer codes as rownames
+  as.matrix() 
+
+plot <- pheatmap(rho_matrix,
+         cluster_rows = TRUE,   # Cluster cancer codes
+         cluster_cols = TRUE,   # Cluster genes
+         color = colorRampPalette(c("blue", "white", "red"))(50), # Define color scale
+         main = "Correlation Heatmap (Rho Values)",
+         na_col = "grey",
+         cellwidth = 10,        # Increase width of each cell
+         cellheight = 10,       # Increase height of each cell
+         fontsize = 12,         
+         fontsize_row = 10,     
+         fontsize_col = 8,
+         angle_col=45
+         
+         )       # Color for missing values
+
+print(plot)
+```
+
+
+#High vs Low AXL Experssing Analysis - KM Curves OS by AXL
+```{r}
+qtile_list <- c(0.25, 0.333, 0.5)
+
+
+for (qtile in qtile_list) {
+  param.2.use <- "AXL"
+  new.param.name <- paste0("AXL_LEVEL_", qtile, "_QUANTILE") 
+  
+  # Iterate over each dataset in TCGA.Selected.Datasets
+  for (code in names(TCGA.Selected.Datasets)) {
+    
+    # Extract the expression matrix and clinical data
+    df <- TCGA.Selected.Datasets[[code]]$df
+    clinical_data <- TCGA.Selected.Datasets[[code]]$clinical_data
+    
+    # Calculate the quantile thresholds for "High" and "Low" groups
+    high_threshold <- quantile(df[, param.2.use], 1 - qtile, na.rm = TRUE)
+    low_threshold <- quantile(df[, param.2.use], qtile, na.rm = TRUE)
+    
+    # Assign "High" and "Low" labels based on the thresholds
+    clinical_data[, new.param.name] <- NA  # Initialize the new column with NA values
+    clinical_data[df[, param.2.use] >= high_threshold, new.param.name] <- "High"
+    clinical_data[df[, param.2.use] < low_threshold, new.param.name] <- "Low"
+    
+    # Update the clinical data in the main list
+    TCGA.Selected.Datasets[[code]]$clinical_data <- clinical_data
+    
+    # Create the KM curve plot
+    if (new.param.name %in% colnames(clinical_data) &&
+      "OS_MONTHS" %in% colnames(clinical_data) &&
+      "OS_STATUS" %in% colnames(clinical_data)) {
+    
+      # Filter data to include only 'High' and 'Low' AXL_LEVEL
+      filtered_data <- clinical_data[clinical_data[[new.param.name]] %in% c("High", "Low"), ]
+      
+      # Create a survival object with filtered data
+      surv_object <- Surv(time = filtered_data$OS_MONTHS, 
+                          event = as.numeric(gsub(":.*", "", filtered_data$OS_STATUS)))
+      
+      group <- filtered_data[[new.param.name]]
+    
+      # Fit the survival model by AXL expression group
+      fit <- survfit(surv_object ~ group, data = filtered_data)
+      
+      filename <- sprintf("KMCurve_by_AXL_expression_%s_%s_quantile.png", code, qtile)
+      file_path <- file.path(OUTPUT_DIR_PATH, filename)
+      
+      plot_title <- sprintf("%s - Kaplan-Meier Curve by AXL Expression Group - %s quantile", code, qtile)
+      
+      # Plot the KM curve
+      surv_plot <- ggsurvplot(fit, 
+                 data = filtered_data,
+                 risk.table = TRUE,          # Show risk table
+                 pval = TRUE,                # Show p-value
+                 conf.int = TRUE,            # Show confidence intervals
+                 legend.labs = c("High", "Low"),  # Rename legend labels
+                 legend.title = "AXL Expression",
+                 xlab = "Time in Months",
+                 ylab = "Survival Probability",
+                 title = plot_title,
+                 palette = c("#E7B800", "#2E9FDF"))  # Customize colors
+      ggsave(filename = file_path, plot = surv_plot$plot, width= 8, height = 6, dpi = 300)
+    } else {
+      message("Required columns are missing in the clinical data.")
+    }
+    
+  }
+}
+```

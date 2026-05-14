@@ -1,0 +1,39 @@
+# R data and serialized objects (not source)
+*.RData
+*.rda
+*.rds
+*.RDS
+
+# Logs
+*.log
+logs/
+
+# Plots and common figure / report outputs
+*.png
+*.pdf
+*.jpg
+*.jpeg
+*.svg
+*.tiff
+*.tif
+*.eps
+*.html
+
+# Environments and tooling (not project source)
+.conda/
+.cursor-server/
+.cursor/
+.cache/
+.local/
+.claude/
+.config/
+.vscode/
+.vscode-R/
+
+# R user library under this tree
+R/
+
+# OS / misc
+.DS_Store
+*.swp
+*~

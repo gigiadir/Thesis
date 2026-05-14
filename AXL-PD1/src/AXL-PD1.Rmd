@@ -1,0 +1,236 @@
+---
+title: "AXL-PD1"
+output: html_document
+date: "2024-06-05"
+---
+
+##Setting Up Libraries, globals and sources
+```{r}
+
+  DATA_DIR_PATH <- file.path(BASE_DIR_PATH, "data")
+  
+  
+  source(file.path(BASE_DIR_PATH, "src/requirements.R"))
+
+  for(file in list.files(path = file.path(BASE_DIR_PATH, "src/utils") ,full.names = TRUE)) {
+    source(file)
+  }
+  
+  library(Seurat)
+  library(SeuratWrappers)
+  library(dplyr)
+  library(tidyr)
+  library(tibble)
+  library(miceadds)
+  library(TCGAbiolinks)
+  library(ggplot2)
+```
+
+
+##Find Markers and consturct signature matrix
+```{r}
+Idents(pbmc) <- pbmc$cell_type
+markers_presto <- RunPrestoAll(pbmc)
+top_markers <- markers_presto %>% group_by(cluster) %>% top_n(n=50, wt = auc) %>% ungroup()
+
+cell_types <- unique(top_markers$cluster)
+
+signature_matrix_list <- list()
+
+for (cl in cell_types) {
+  # Removing the cells without cell-type
+  if (cl == cell_types[13]) {
+    next
+  }
+  # Get the top markers for the current cluster
+  cluster_markers <- top_markers %>%
+    filter(cluster == cl) %>%
+    pull(gene)
+  
+  # Subset the Seurat object to the cells in the current cluster
+  cells_in_cluster <- WhichCells(pbmc, idents = cl)
+  subset_seurat <- subset(pbmc, cells = cells_in_cluster)
+  
+  # Extract the average expression of the marker genes for the current cluster
+  avg_expression <- AverageExpression(subset_seurat, features = cluster_markers, return.seurat = FALSE)
+  
+  # Convert the average expression to a data frame
+  avg_expression_df <- as.data.frame(avg_expression$RNA) %>%
+    rownames_to_column(var = "gene") %>%
+    pivot_longer(cols = -gene, names_to = "cell_type", values_to = "avg_expression") %>%
+    mutate(cell_type = cl)
+  
+  # Add the average expression data frame to the list
+  signature_matrix_list[[cl]] <- avg_expression_df
+}
+
+# Combine all the average expression data frames into a single data frame
+combined_df <- bind_rows(signature_matrix_list)
+
+# Spread the data frame to create the signature matrix
+signature_matrix <- combined_df %>%
+  pivot_wider(names_from = cell_type, values_from = avg_expression, values_fill = list(avg_expression = 0)) %>%
+  column_to_rownames(var="gene")
+
+signature_matrix_path = file.path(OUTPUT_DIR_PATH, "signature_matrix.txt")
+write.table(signature_matrix, file = signature_matrix_path, sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE, fileEncoding = "UTF-8")
+
+signature.mtx.zscore = my.scale.zscore(signature_matrix, scale.by="rows")
+heatmap <- pheatmap(signature.mtx.zscore, cluster_rows = FALSE, cluster_cols =FALSE, show_rownames = FALSE)
+```
+
+
+##BioPortalData For TCGA clone
+```{r}
+  if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("cBioPortalData")
+BiocManager::install("AnVIL")
+
+library(cBioPortalData)
+library(AnVIL)
+library(ggplot2)
+
+# Initialize the cBioPortal connection
+cbio <- cBioPortal()
+studies <- getStudies(cbio)
+study_ids <- c("brca_tcga", "acc_tcga", "skcm_tcga", "lusc_tcga", "hnsc_tcga")
+
+process_study <- function (study_id) {
+  cat("Processing study:", study_id, "\n")
+  study_data <- cBioDataPack(study_id)
+  study_assay <- assay(study_data, "mrna_seq_v2_rsem")
+  counts_mtx <- round(study_assay)
+  clinical_data <- colData(study_data)
+
+  # Process the data
+  patient_barcodes <- gsub("\\-01$", "", colnames(counts_mtx))
+  colnames(counts_mtx) <- patient_barcodes
+  
+  # Ensure AXL is present in the dataset
+  if ("AXL" %in% rownames(counts_mtx)) {
+    axl_expression <- counts_mtx["AXL", patient_barcodes]
+    combined_data_list <- list(
+      PATIENT_ID = patient_barcodes,
+      AXL_EXPRESSION = axl_expression
+    )
+
+# List of possible fields to check and plot against AXL_EXPRESSION
+fields_to_check <- c("GRADE", "CLINICAL_STAGE", "AJCC_PATHOLOGIC_TUMOR_STAGE")
+
+# Loop through the fields to check if they exist and add them to the data frame
+for (field in fields_to_check) {
+  if (field %in% colnames(clinical_data)) {
+    # Dynamically add the field to the data frame
+    field_data <- clinical_data[[field]][match(patient_barcodes, clinical_data$PATIENT_ID)]
+    
+    # Replace placeholder values (e.g., "[Not Applicable]") with NA
+    field_data[field_data == "[Not Applicable]"] <- NA
+    
+    # Add the cleaned field data to the list
+    combined_data_list[[field]] <- field_data
+    
+    # Convert the list to a data frame for plotting
+    combined_data <- as.data.frame(combined_data_list)
+    
+    # Remove rows with NA values for the current field
+    plot_data <- combined_data[!is.na(combined_data[[field]]), ]
+    
+    # Plot AXL_EXPRESSION against the current field if there are valid values
+    if (nrow(plot_data) > 0) {
+      p <- gg.box.plot.with.names(plot_data,
+                                  category.x.col = field,
+                                  quantitative.y.col = "AXL_EXPRESSION",
+                                  title = paste("AXL Expression By", field),
+                                  point.size = 0.5,
+                                  jitter.factor = 1,
+                                  is.print.label = FALSE)
+      print(p)  # Print the plot
+    } else {
+      cat("No valid data to plot for", field, "\n")
+    }
+  }
+}
+  } else {
+    cat("AXL gene not found in study:", study_id, "\n")
+  }
+}
+
+for (study_id in study_ids) {
+  process_study(study_id)  
+}
+```
+
+
+##Prepare & Run CIBERSORTx
+```{r}
+source(file.path(BASE_DIR_PATH, "src/07.CYBERSORTx/CIBERSORT.R"))
+
+#Remove duplicated rows from the mixture (keep one copy of each gene)
+counts_mtx_without_duplicated_rows = counts_mtx[!duplicated(rownames(counts_mtx)), ]
+counts_matrix_path = file.path(OUTPUT_DIR_PATH, "counts_matrix.txt")
+
+write.table(counts_mtx_without_duplicated_rows, file = counts_matrix_path, sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE, fileEncoding = "UTF-8")
+
+CIBERSORT_res <- CIBERSORT(signature_matrix_path, counts_matrix_path)
+CIBERSORT.res.only.celltypes <- CIBERSORT_res[,cell_types]
+CIBERSORT.res.only.celltypes <- CIBERSORT.res.only.celltypes[,colnames(CIBERSORT.res.only.celltypes) != "P-value"]
+
+```
+
+```{r}
+cbio <- cBioPortal()
+studies <- getStudies(cbio)
+study_ids <- c("brca_tcga", "acc_tcga", "skcm_tcga", "lusc_tcga", "hnsc_tcga")
+
+process_study <- function (study_id) {
+  cat("Processing study:", study_id, "\n")
+  study_data <- cBioDataPack(study_id)
+  study_assay <- assay(study_data, "mrna_seq_v2_rsem")
+  counts_mtx <- round(study_assay)
+  clinical_data <- colData(study_data)
+
+  # Process the data
+  patient_barcodes <- gsub("\\-01$", "", colnames(counts_mtx))
+  colnames(counts_mtx) <- patient_barcodes
+  ...
+}
+```
+
+```{r}
+TCGA.available <- c("ACC", "BRCA", "BLCA", "CESC", "CHOL", "COAD",
+                    "ESCA", "GBM", "HNSC", "KICH", "KIRC", "KIRP", "LGG",
+                    "LIHC", "LUAD", "LUSC", "PAAD", "PCPG", "PRAD", "READ",
+                    "SKCM", "SARC", "STAD", "THCA", "UCEC", "UCS", "UVM")
+
+# Initialize a list to store results
+tcga_study_max_cases <- list()
+
+# Iterate over each TCGA code
+for (code in TCGA.available) {
+  # Retrieve all studies
+  studies <- getStudies(cbio)
+  
+  # Filter studies by code in lowercase followed by an underscore
+  code_pattern <- paste0("(^", tolower(code), "_|_", tolower(code), "_)")
+  relevant_studies <- subset(studies, grepl(code_pattern, studies$studyId))
+  
+  # Check if there are relevant studies
+  if (nrow(relevant_studies) > 0) {
+    # Find the study with the maximum case count
+    max_case_study <- relevant_studies[which.max(relevant_studies$allSampleCount), ]
+    
+    # Store result for this TCGA code
+    tcga_study_max_cases[[code]] <- list(
+      studyId = max_case_study$studyId,
+      allSampleCount = max_case_study$allSampleCount
+    )
+  } else {
+    message(paste("No studies found for code:", code))
+  }
+}
+
+# Display results
+tcga_study_max_cases
+```
+

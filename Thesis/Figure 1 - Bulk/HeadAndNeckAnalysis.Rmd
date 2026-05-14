@@ -1,0 +1,639 @@
+---
+title: "HeadAndNeckAnalysis"
+author: "Adir Gigi"
+date: "2024-09-29"
+output: html_document
+---
+
+##Requirements
+
+```{r}
+source("~/AXL-PD1/src/globals/constants.R")
+CODE_DIR_PATH <- "~/Thesis/Figure 1 - Bulk"
+OUTPUT_DIR_PATH <- "~/Thesis/Figure 1 - Bulk/outputs"
+source(file.path(CODE_DIR_PATH, "utils/Utils.R"))
+source(file.path(CODE_DIR_PATH, "utils/Seurat.Utils.R"))
+source(file.path(CODE_DIR_PATH, "utils/RNA.seq.Utils.R"))
+source(file.path(CODE_DIR_PATH, "utils/07.CYBERSORTx/CIBERSORT.R"))
+
+library(Seurat)
+library(SeuratWrappers)
+library(ggplot2)
+library(dplyr)
+BiocManager::install("scran")
+library(scran)
+```
+
+```{r}
+load(file.path(DROPBOX_DIR_PATH, "Shared_RDataObjects/GSDB.list.of.lists.RData"))
+load(file.path(DROPBOX_DIR_PATH, "Shared_RDataObjects/GSDB.list.inclusive.RData"))
+```
+
+# Load Data
+
+```{r}
+SC.3CA.Tirosh.Head_And_Neck.Input.Path <- file.path(CANCER_DB_DIR_PATH, "SC.3CA.Tirosh/Head_and_Neck")
+SC.3CA.Tirosh.Head_And_Neck.Output.Path <- file.path(DATA_DIR_PATH, "SC.3CA.Tirosh/Head_and_Neck")
+
+Kurten.2021.Data.Path <- file.path(SC.3CA.Tirosh.Head_And_Neck.Input.Path, "Data_Kürten2021_Head and Neck")
+Kurten.2021.Seurat <- load.and.create.seurat(mtx_path = file.path(Kurten.2021.Data.Path, "Exp_data_UMIcounts.mtx"),
+                                             cells_path = file.path(Kurten.2021.Data.Path, "Cells.csv"),
+                                             genes_path = file.path(Kurten.2021.Data.Path, "Genes.txt"),
+                                             metadata_path = file.path(Kurten.2021.Data.Path, "Meta-data.csv"))
+
+Kurten.2021.Seurat <- seurat.pipeline(Kurten.2021.Seurat)
+Kurten.2021.Seurat <- RunALRA(Kurten.2021.Seurat)
+my.save.RData("Kurten.2021.Seurat", myfolder=SC.3CA.Tirosh.Head_And_Neck.Output.Path, is.load.obj = T)
+
+
+Cillo.2020.Data.Path <- file.path(SC.3CA.Tirosh.Head_And_Neck.Input.Path, "Data_Cillo2020_Head and Neck")
+Cillo.2020.Seurat <- load.and.create.seurat(mtx_path = file.path(Cillo.2020.Data.Path, "Exp_data_UMIcounts.mtx"),
+                                             cells_path = file.path(Cillo.2020.Data.Path, "Cells.csv"),
+                                             genes_path = file.path(Cillo.2020.Data.Path, "Genes.txt"),
+                                             metadata_path = file.path(Cillo.2020.Data.Path, "Meta-data.csv"))
+
+Cillo.2020.Seurat <- seurat.pipeline(Cillo.2020.Seurat)
+Cillo.2020.Seurat <- RunALRA(Cillo.2020.Seurat)
+my.save.RData("Cillo.2020.Seurat", myfolder=SC.3CA.Tirosh.Head_And_Neck.Output.Path, is.load.obj = T)
+
+
+Puram.2017.Data.Path <- file.path(SC.3CA.Tirosh.Head_And_Neck.Input.Path, "Data_Puram2017_Head and Neck")
+Puram.2017.Seurat <- load.and.create.seurat(mtx_path = file.path(Puram.2017.Data.Path, "Exp_data_TPM.mtx"),
+                                             cells_path = file.path(Puram.2017.Data.Path, "Cells.csv"),
+                                             genes_path = file.path(Puram.2017.Data.Path, "Genes.txt"),
+                                             metadata_path = file.path(Puram.2017.Data.Path, "Meta-data.csv"))
+Puram.2017.Seurat <- seurat.pipeline(Puram.2017.Seurat, is_tpm = T)
+Puram.2017.Seurat <- RunALRA(Puram.2017.Seurat)
+my.save.RData("Puram.2017.Seurat", myfolder=SC.3CA.Tirosh.Head_And_Neck.Output.Path, is.save.obj = T)
+
+
+
+```
+
+
+
+# Initial Analysis & Plots
+
+##UMAP by cell_type
+```{r}
+DimPlot(Puram.2017.Seurat, reduction = "umap", group.by = "cell_type") +
+  labs(title = "Puram 2017 UMAP") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+ggsave(filename = "Puram2017-UMAP-cell-type.png", path = OUTPUT_DIR_PATH, width = 10, height=6)
+
+DimPlot(Cillo.2020.Seurat, reduction = "umap", group.by = "cell_type") +
+  labs(title = "Cillo 2020 UMAP") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+ggsave(filename = "Cillo2020-UMAP-cell-type.png", path = OUTPUT_DIR_PATH, width = 10, height=6)
+
+DimPlot(Kurten.2021.Seurat, reduction = "umap", group.by = "cell_type") +
+  labs(title = "Kurten 2021 UMAP") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+ggsave(filename = "Kurten2021-UMAP-cell-type.png", path = OUTPUT_DIR_PATH, width = 10, height=6)
+
+
+```
+
+
+
+##AXL by cell-type for each dataset
+```{r}
+VlnPlot(Kurten.2021.Seurat, features = "AXL", group.by = "cell_type") +
+  labs(title = "Kurten 2021 - AXL By Cell Type (Before ALRA)") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+ggsave(filename = "Kurten2021-AXL-by-cell-type.png", path = OUTPUT_DIR_PATH, width = 10, height=6)
+
+DefaultAssay(Kurten.2021.Seurat) <- "alra"
+VlnPlot(Kurten.2021.Seurat, features = "AXL", group.by = "cell_type") +
+  labs(title = "Kurten 2021 - AXL By Cell Type (After ALRA)") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+ggsave(filename = "Kurten2021-AXL-by-cell-type-Alra.png", path = OUTPUT_DIR_PATH, width = 10, height=6)
+
+DefaultAssay(Cillo.2020.Seurat) <- "alra"
+VlnPlot(Cillo.2020.Seurat, features = "AXL", group.by = "cell_type")  +
+  labs(title = "Cillo 2020 - AXL By Cell Type (After ALRA)") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+ggsave(filename = "Cillo2020-AXL-by-cell-type.png", path = OUTPUT_DIR_PATH, width = 10, height=6)
+
+DefaultAssay(Puram.2017.Seurat) <- "alra"
+VlnPlot(Puram.2017.Seurat, features = "AXL", group.by = "cell_type")  +
+  labs(title = "Puram 2017 - AXL By Cell Type (After ALRA)") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16))
+ggsave(filename = "Puram2017-AXL-by-cell-type.png", path = OUTPUT_DIR_PATH, width = 10, height=6)
+```
+
+
+##HAVRC2 by cell-type for Kurten2021 Dataset
+```{r}
+# After pan-can bulk analysis, we have seen that HAVCR2 is highly correlated with AXL, as well as Macrophages and CAFs.
+DefaultAssay(Kurten.2021.Seurat) <- "alra"
+
+VlnPlot(Kurten.2021.Seurat, features = "HAVCR2", group.by = "cell_type")
+ggsave(filename = "Kurten2021-HAVCR2-by-cell-type.png", path = OUTPUT_DIR_PATH, width = 10, height=6)
+```
+
+
+
+# Find Cell-Type AXL Signature
+
+##Correlate Pairs - Find Correlated Pairs with AXL
+```{r}
+
+Cell.Types.To.Create.Signatures <- c("Fibroblast", "Macrophage", "Malignant", "T_cell")
+
+
+find_correlated_pairs_per_cell_type <- function(seurat_obj, target_gene = "AXL", top_n = 1000) {
+    results <- list()
+    
+    seurat_obj_cell_types <- unique(seurat_obj$cell_type)
+    Idents(seurat_obj) <- seurat_obj$cell_type
+    
+    for(curr_cell_type in seurat_obj_cell_types) {
+      message(paste("Starting ", curr_cell_type))
+
+      if(!(curr_cell_type %in% seurat_obj_cell_types)) {  
+        message(paste("Skipping", curr_cell_type, "- not found in metadata"))
+        next
+      } 
+      
+      cell_subset <- subset(seurat_obj, subset = cell_type == curr_cell_type)
+      target_gene_vector <- rep(target_gene, nrow(cell_subset) - 1)
+      other_genes_vector <- rownames(cell_subset)[rownames(cell_subset) != target_gene]
+      pairings <- list(target_gene_vector, other_genes_vector)
+      
+      correlations <- correlatePairs(cell_subset@assays$alra@data, pairings = pairings)
+      
+      top_correlated <- as.data.frame(correlations) %>%
+          dplyr::filter(!is.na(rho) & FDR < 0.1) %>%
+          arrange(desc(rho)) %>%
+          head(top_n)
+      
+      results[[curr_cell_type]] <- top_correlated
+    }
+    
+    return (results)
+}
+
+Kurten.2021.correlated.pairs.with.AXL.per.cell.type <- find_correlated_pairs_per_cell_type(Kurten.2021.Seurat, "AXL")
+Cillo.2020.correlated.pairs.with.AXL.per.cell.type <- find_correlated_pairs_per_cell_type(Cillo.2020.Seurat, "AXL")
+Puram.2017.correlated.pairs.with.AXL.per.cell.type <- find_correlated_pairs_per_cell_type(Puram.2017.Seurat, "AXL")
+
+```
+
+
+
+
+## Combine Correlated Pairs Result For Constructing Cell-Type Specific AXL Signature
+```{r}
+library(VennDiagram)
+library(grid)
+
+AXL.signature.per.cell.type <- list(
+  Macrophage = Reduce(intersect, list(Kurten.2021.correlated.pairs.with.AXL.per.cell.type$Macrophage$gene2, Cillo.2020.correlated.pairs.with.AXL.per.cell.type$Macrophage$gene2)),
+  Fibroblast = Reduce(intersect, list(Kurten.2021.correlated.pairs.with.AXL.per.cell.type$Fibroblast$gene2, Puram.2017.correlated.pairs.with.AXL.per.cell.type$Fibroblast$gene2)),
+  Malignant = Reduce(intersect, list(Kurten.2021.correlated.pairs.with.AXL.per.cell.type$Malignant$gene2, Puram.2017.correlated.pairs.with.AXL.per.cell.type$Malignant$gene2)),
+   T_cell = Reduce(intersect, list(Kurten.2021.correlated.pairs.with.AXL.per.cell.type$T_cell$gene2, Puram.2017.correlated.pairs.with.AXL.per.cell.type$T_cell$gene2))
+)
+
+# Venn Diagram of T_cell-specific-AXL signatures per study
+venn.plot <- venn.diagram(
+  x = list(Kurten2021 = Kurten.2021.correlated.pairs.with.AXL.per.cell.type$T_cell$gene2,
+           Puram2017 = Puram.2017.correlated.pairs.with.AXL.per.cell.type$T_cell$gene2, 
+           Cillo2020 = Cillo.2020.correlated.pairs.with.AXL.per.cell.type$T_cell$gene2),
+  category.names = c("Kurten 2021", "Puram 2017", "Cillo 2020"),
+    fill = c("red", "blue", "green"),  # Colors for the sets
+  alpha = 0.5,  # Transparency (optional)
+  label.col = "white",  # Color of the labels (optional)
+  cex = 1.5,  # Size of the labels (optional)
+  cat.cex = 1.5 , # Size of the category labels (optional)
+  filename = NULL,  # Explicitly NULL prevents any missing argument errors
+  output = TRUE
+)
+grid.newpage() # Clears any existing plots to prevent overlap
+grid.draw(venn.plot)
+
+```
+
+```{r}
+# Named list of the correlated AXL gene lists per study
+correlated_genes_lists <- list(
+  Kurten = Kurten.2021.correlated.pairs.with.AXL.per.cell.type,
+  Cillo  = Cillo.2020.correlated.pairs.with.AXL.per.cell.type,
+  Puram  = Puram.2017.correlated.pairs.with.AXL.per.cell.type
+)
+
+# Function to compute intersections
+get_intersections_per_study <- function(studies_markers, correlated_lists) {
+  result <- list()
+
+  for (study in names(correlated_lists)) {
+    markers <- studies_markers[[study]]
+    correlated <- correlated_lists[[study]]
+    
+    cell_types <- intersect(names(markers), names(correlated))  # Only process shared cell types
+    study_result <- list()
+
+    for (cell_type in cell_types) {
+      markers_genes <- as.character(markers[[cell_type]])
+      correlated_genes <- as.character(correlated[[cell_type]]$gene2)
+      common_genes <- intersect(markers_genes, correlated_genes)
+      
+      study_result[[cell_type]] <- common_genes
+    }
+
+    result[[study]] <- study_result
+  }
+
+  return(result)
+}
+
+# Call the function
+top.markers.and.axl.correlated.pairs.intersections <- get_intersections_per_study(Studies.Markers, correlated_genes_lists)
+my.save.RData("top.markers.and.axl.correlated.pairs.intersections", file.path(OUTPUT_DIR_PATH, "RData_objects"), is.save.obj = T)
+```
+
+
+##Figure 1C
+
+```{r}
+Kurten.2021.Seurat <- AddMetaData(Kurten.2021.Seurat, Kurten.2021.Seurat@meta.data$patient, "Patient")
+DefaultAssay(Kurten.2021.Seurat) <- "alra"
+Idents(Kurten.2021.Seurat) <- Kurten.2021.Seurat$cell_type
+
+
+Kurten.2021.Malignant.Cells <- subset(Kurten.2021.Seurat, subset = cell_type == "Malignant")
+Kurten.2021.Malignant.Cells.AXL.Expression <- FetchData(Kurten.2021.Malignant.Cells,  vars = "AXL", layer = "data")
+Kurten.2021.Malignant.Cells <- AddModuleScore(Kurten.2021.Malignant.Cells, list(AXL.signature.per.cell.type[["Malignant"]]), name="Correlation_AXL_Signature_In_Malignant")
+
+
+Kurten.2021.AXL.Stats <- data.frame(
+  Patient = Kurten.2021.Malignant.Cells@meta.data$Patient,
+  AXL = Kurten.2021.Malignant.Cells.AXL.Expression$AXL,
+  AXL_By_Signature = Kurten.2021.Malignant.Cells@meta.data$Correlation_AXL_Signature_In_Malignant1
+) %>% group_by(Patient) %>%
+  dplyr::summarize(mean_AXL = mean(AXL, na.rm = TRUE),
+                   median_AXL = median(AXL, na.rm = TRUE),
+                   mean_correlation_score_from_axl_signature = mean(AXL_By_Signature, na.rm = TRUE),
+                   quantile_0.95_AXL = quantile(AXL, probs = 0.95, na.rm = TRUE),
+                   quantile_0.96_AXL = quantile(AXL, probs = 0.96, na.rm = TRUE),
+                   quantile_0.97_AXL = quantile(AXL, probs = 0.97, na.rm = TRUE),
+                   quantile_0.98_AXL = quantile(AXL, probs = 0.98, na.rm = TRUE),
+                   quantile_0.99_AXL = quantile(AXL, probs = 0.99, na.rm = TRUE),
+                   quantile_0.995_AXL = quantile(AXL, probs = 0.995, na.rm = TRUE),
+                   quantile_0.9995_AXL = quantile(AXL, probs = 0.9995, na.rm = TRUE),
+                   max_AXL = max(AXL, na.rm = TRUE)
+              )
+
+my.save.RData("Kurten.2021.AXL.Stats", file.path(OUTPUT_DIR_PATH, "RData_objects"))
+Signatures.To.Correlate <- list(
+  T_Cells = GSDB.list.of.lists$cell.types.main$T.cells,
+  T_CD8 = GSDB.list.of.lists$cell.types.main$T.CD8,
+  T_CD4 = GSDB.list.of.lists$cell.types.main$T.CD4,
+  Tirosh_T_Cell_Exhaustion = GSDB.list.inclusive$Tirosh.T_Cell_exhaustion
+)
+
+Kurten.2021.Seurat <- AddModuleScore(Kurten.2021.Seurat, Signatures.To.Correlate, name = names(Signatures.To.Correlate))
+
+Kurten.2021.Signatures.Correlations <- data.frame(
+  Patient = Kurten.2021.Seurat@meta.data$Patient,
+  T_Cell = Kurten.2021.Seurat@meta.data$T_Cells1,
+  T_CD8 = Kurten.2021.Seurat@meta.data$T_CD82,
+  T_CD4 = Kurten.2021.Seurat@meta.data$T_CD43,
+  Tirosh_T_Cell_Exhaustion = Kurten.2021.Seurat@meta.data$Tirosh_T_Cell_Exhaustion4
+) %>% group_by(Patient) %>%
+  dplyr::summarize(
+    mean_T_Cell_Expression = mean(T_Cell, na.rm = TRUE),
+    mean_T_CD8_Expression = mean(T_CD8, na.rm = TRUE),
+    mean_T_CD4_Expression = mean(T_CD4, na.rm = TRUE),
+    mean_T_Cell_Exhaustion_Expression = mean(Tirosh_T_Cell_Exhaustion, na.rm = TRUE)
+  )
+
+my.save.RData("Kurten.2021.Signatures.Correlations", file.path(OUTPUT_DIR_PATH, "RData_objects"))
+
+Kurten.2021.T.Cells <- subset(Kurten.2021.Seurat, subset = cell_type == "T_cell")
+Kurten.2021.T.Cells.PD1.Expression <- FetchData(Kurten.2021.T.Cells, vars = "PDCD1", layer = "data")
+
+Kurten.2021.T.Cells.PD1.Stats <- data.frame(
+  Patient = Kurten.2021.T.Cells@meta.data$Patient,
+  PD1 = Kurten.2021.T.Cells.PD1.Expression$PDCD1
+) %>% group_by(Patient) %>%
+  dplyr::summarize(mean_PD1_T_Cells = mean(PD1, na.rm = TRUE),
+                   median_PD1_T_Cells = median(PD1, na.rm = TRUE),
+                   quartile_PD1_T_Cells = quantile(PD1, probs = 0.75, na.rm = TRUE))
+
+# Merging data frames for plotting
+Kurten.2021.Merged <- Kurten.2021.AXL.Stats %>%
+  inner_join(Kurten.2021.Signatures.Correlations, by = "Patient") %>%
+  inner_join(Kurten.2021.T.Cells.PD1.Stats, by = "Patient")
+my.save.RData("Kurten.2021.Merged", file.path(OUTPUT_DIR_PATH, "RData_objects"))
+
+
+# Creating the plot
+library(ggplot2)
+library(reshape2)
+
+# Reshaping data for easier plotting with multiple Y values
+Kurten.2021.Plot.Data <- Kurten.2021.Merged %>%
+  select(
+    Patient, quantile_0.99_AXL, 
+    mean_T_Cell_Expression, mean_T_CD8_Expression, mean_T_CD4_Expression,
+    mean_T_Cell_Exhaustion_Expression, mean_PD1_T_Cells, median_PD1_T_Cells, quartile_PD1_T_Cells
+  ) %>%
+  melt(id.vars = c("Patient", "quantile_0.99_AXL"), 
+       variable.name = "Metric", value.name = "Value")
+
+# Plotting
+p1 <- ggplot(Kurten.2021.Plot.Data, aes(x = quantile_0.99_AXL, y = Value, color = Metric)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE, aes(group = Metric), size = 1) +
+  labs(title = "Best-Fitting Lines for Expression Metrics",
+       x = "Quantile_0.99_AXL", y = "Expression Value", color = "Expression Metric") +
+  theme_minimal()
+
+p2 <- ggplot(Kurten.2021.Plot.Data, aes(x = quantile_0.99_AXL, y = Value, color = Metric)) +
+  geom_line(aes(group = Metric), size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Expression Metrics by Quantile_0.99_AXL",
+       x = "Quantile_0.99_AXL", y = "Expression Value", color = "Expression Metric") +
+  theme_minimal()
+
+ggsave(file.path(OUTPUT_DIR_PATH, "plot1_bestfit_lines.png"), plot = p1, width = 8, height = 6, dpi = 300)
+ggsave(file.path(OUTPUT_DIR_PATH, "plot2_connected_lines.png"), plot = p2, width = 8, height = 6, dpi = 300)
+```
+
+
+
+
+
+
+# Bulk Analysis - Deconvolution
+
+## Create Signatures Matrix For CIBERSORTx
+```{r}
+# 1. Determine the cell-types I wish to see in the deconvolution result
+# 2. Find cell-type markers of the existing cell-types for each SC dataset
+# 3. Intersect cell-type markers of different SC datasets (or another construction) to find cell-specific signature
+# 4. From the cell-type specific signature - construct the signature matrix
+```
+
+### Load H&N Bulk
+```{r}
+# 1. Find the cell-types of the bulk dataset I wish to perform deconvolution on
+
+my.save.RData("HNSC.Bulk.Dataset", myfolder = "/local/ofir/OCohenLab/Dropbox/gigiadir/Figure 1 - Bulk/outputs/RData_objects", is.load.obj = T)
+
+Puram.2017.cell.types <- unique(Puram.2017.Seurat$cell_type)
+Kurten.2021.cell.types <- unique(Kurten.2021.Seurat$cell_type)
+Cillo.2020.cell.types <- unique(Cillo.2020.Seurat$cell_type)
+
+Cell.Types.For.Deconvolution <- Filter(function(x) x != "", unique(c(Puram.2017.cell.types, Kurten.2021.cell.types, Cillo.2020.cell.types)))
+```
+###Find Cell-Type Markers
+
+```{r}
+# 2. Find cell-type markers of the existing cell-types for each SC dataset
+
+find.markers.by.cell.type <- function(seurat, n_markers = 1000) {
+  Idents(seurat) <- seurat$cell_type
+  markers_presto <- RunPrestoAll(seurat, assay = "alra")
+  top_markers <- markers_presto %>% group_by(cluster) %>% top_n(n=n_markers, wt = auc) %>% ungroup()
+  genes_by_cluster <- split(top_markers$gene, top_markers$cluster)
+  
+  return(genes_by_cluster)
+}
+
+Kurten.2021.top.markers.by.cell.type <- find.markers.by.cell.type(Kurten.2021.Seurat)
+Cillo.2020.top.markers.by.cell.type <- find.markers.by.cell.type(Cillo.2020.Seurat)
+Puram.2017.top.markers.by.cell.type <- find.markers.by.cell.type(Puram.2017.Seurat)
+
+my.save.RData("Kurten.2021.top.markers.by.cell.type", "~/Thesis/Figure 1 - Bulk/outputs/RData_objects", is.load.obj = T)
+my.save.RData("Cillo.2020.top.markers.by.cell.type", "~/Thesis/Figure 1 - Bulk/outputs/RData_objects", is.load.obj = T)
+my.save.RData("Puram.2017.top.markers.by.cell.type", "~/Thesis/Figure 1 - Bulk/outputs/RData_objects", is.load.obj = T)
+```
+
+
+###Construct Cell-Type Signature 
+
+```{r}
+# 3. Intersect cell-type markers of different SC datasets (or another construction) to find cell-specific signature
+Cell.Type.Signatures <- list()
+SIGNATURE_MAX_LENGTH <- 50
+
+Studies.Markers <- list(Puram = Puram.2017.top.markers.by.cell.type,
+                        Cillo = Cillo.2020.top.markers.by.cell.type,
+                        Kurten = Kurten.2021.top.markers.by.cell.type)
+
+for(cell_type in Cell.Types.For.Deconvolution) {
+  markers_per_study <- list()
+  
+  for(study in names(Studies.Markers)) {
+    if (cell_type %in% names(Studies.Markers[[study]])) {
+      markers_per_study[[study]] <- Studies.Markers[[study]][[cell_type]]
+    }
+  }
+  
+  if(length(markers_per_study) > 1) {
+    Cell.Type.Signatures[[cell_type]] <- Reduce(intersect, markers_per_study)
+  } else {
+    Cell.Type.Signatures[[cell_type]] <- unlist(markers_per_study)
+  }
+}
+
+# Manually Override Dendritic
+{Cell.Type.Signatures}[["Dendritic"]] <- intersect(Kurten.2021.top.markers.by.cell.type$Dendritic,
+                                                 Cillo.2020.top.markers.by.cell.type$Dendritic)
+
+# Take the top 50 for each cell-type to construct the signature
+Cell.Type.Signatures.For.Matrix <- lapply(Cell.Type.Signatures, function(top_markers_list) top_markers_list[1 : min(length(top_markers_list), SIGNATURE_MAX_LENGTH)])
+
+```
+
+### Construct Signature Matrix
+```{r}
+# 4. From the cell-type specific signature - construct the signature matrix
+CIBERSORTx.Construct.Signature.Matrix <- function(seurat_object) {
+  #TODO: IMPLEMENT
+}
+
+Kurten.2021.Signature.Matrix <- NULL
+my.save.RData("Kurten.2021.Signature.Matrix", "~/Thesis/Figure 1 - Bulk/outputs/RData_objects", is.load.obj = T)
+```
+
+## Run Deconvolution
+```{r}
+Bulk.Path <- "~/Thesis/Figure 1 - Bulk/outputs/HNSC.Bulk.Expression.txt"
+write.table(HNSC.Bulk.Dataset$counts, file = Bulk.Path, sep="\t", quote = F, row.names = T, col.names = T, fileEncoding = "UTF-8")
+
+Signature.Matrix.Path <- "~/Thesis/Figure 1 - Bulk/outputs/Kurten.2021.Signature.Matrix.txt"
+Bulk.Deconvolution <- CIBERSORT(Signature.Matrix.Path, Bulk.Path)
+```
+
+##Create Figure
+```{r}
+AXL.Signatures.Cell.Types.Bulk.Correlations <- list()
+CIBERSORT.Cell.Type.Result <- list()
+
+for(cell_type in names(AXL.signature.per.cell.type)) {
+  AXL.Signatures.Cell.Types.Bulk.Correlations[[cell_type]] <- calc.Signatures.AUC(HNSC.Bulk.Dataset$counts,
+                     GSDB.list = AXL.signature.per.cell.type[[cell_type]],
+                     top.n.percent.of.genes.in.ranking.used = 20)
+  
+  CIBERSORT.Cell.Type.Result[[cell_type]] <- Bulk.Deconvolution[, cell_type]
+}
+
+```
+
+```{r}
+library(ggplot2)
+library(reshape2)
+
+# Get common cell types and sort them
+cell_types <- sort(intersect(names(AXL.Signatures.Cell.Types.Bulk.Correlations),
+                             names(CIBERSORT.Cell.Type.Result)))
+
+# Initialize the correlation matrix
+cor_matrix <- matrix(NA, nrow = length(cell_types), ncol = length(cell_types),
+                     dimnames = list(cell_types, cell_types))
+
+# Compute correlations
+for (i in cell_types) {
+  for (j in cell_types) {
+    x <- as.numeric(AXL.Signatures.Cell.Types.Bulk.Correlations[[i]])
+    y <- as.numeric(CIBERSORT.Cell.Type.Result[[j]])
+    
+    if (length(x) == length(y)) {
+      cor_matrix[i, j] <- cor(x, y, method = "pearson")
+    } else {
+      warning(paste("Skipping:", i, "vs", j, "- mismatched length"))
+    }
+  }
+}
+
+cor_df <- melt(cor_matrix, varnames = c("AXL_Cell_Type", "CIBERSORT_Cell_Type"), value.name = "Correlation")
+
+cor_df$AXL_Cell_Type <- factor(cor_df$AXL_Cell_Type, levels = rev(cell_types))
+cor_df$CIBERSORT_Cell_Type <- factor(cor_df$CIBERSORT_Cell_Type, levels = cell_types)
+
+cor_df$label <- ifelse(is.na(cor_df$Correlation), "", sprintf("%.3f", cor_df$Correlation))
+
+# Plot heatmap with labels
+p3 <- ggplot(cor_df, aes(x = CIBERSORT_Cell_Type, y = AXL_Cell_Type, fill = Correlation)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = label), size = 4, color = "black") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0,
+                       limit = c(-1, 1), name = "Pearson\nCorrelation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text = element_text(size = 12),
+        plot.title = element_text(size = 14, face = "bold")) +
+  labs(title = "Correlation Matrix: AXL Signatures Score vs CIBERSORT Score", 
+       x = "CIBERSORT Score (Cell Type Proportion)", 
+       y = "AXL Signature Cell Type Correlation (AUCell)",
+       caption = "Based on 469 patients: Pearson correlation between AXL cell-type signature scores\nand CIBERSORT-inferred cell type score across samples")
+
+ggsave("plot3_correlation_heatmap.png", plot = p3, width = 10, height = 8, dpi = 300)
+
+
+```
+
+
+# Figure 1C - Macrophage 
+```{r}
+Kurten.2021.Seurat <- AddMetaData(Kurten.2021.Seurat, Kurten.2021.Seurat@meta.data$patient, "Patient")
+DefaultAssay(Kurten.2021.Seurat) <- "alra"
+Idents(Kurten.2021.Seurat) <- Kurten.2021.Seurat$cell_type
+
+
+Kurten.2021.Macrophage.Cells <- subset(Kurten.2021.Seurat, subset = cell_type == "Macrophage")
+Kurten.2021.Macrophage.Cells <- AddModuleScore(Kurten.2021.Macrophage.Cells, list(AXL.signature.per.cell.type[["Macrophage"]]), name="Kurten.2021.Macrophage.Cells")
+
+Kurten.2021.AXL.Stats.Macrophages <- data.frame(
+  Patient = Kurten.2021.Macrophage.Cells@meta.data$Patient,
+  AXL_By_Signature = Kurten.2021.Macrophage.Cells@meta.data$Kurten.2021.Macrophage.Cells1
+) %>% group_by(Patient) %>%
+  dplyr::summarize(
+                mean_correlation_score_from_axl_signature = mean(AXL_By_Signature, na.rm = TRUE)
+              )
+
+
+Kurten.2021.Signatures.Correlations <- data.frame(
+  Patient = Kurten.2021.Seurat@meta.data$Patient,
+  T_Cell = Kurten.2021.Seurat@meta.data$T_Cells1,
+  T_CD8 = Kurten.2021.Seurat@meta.data$T_CD82,
+  T_CD4 = Kurten.2021.Seurat@meta.data$T_CD43,
+  Tirosh_T_Cell_Exhaustion = Kurten.2021.Seurat@meta.data$Tirosh_T_Cell_Exhaustion4
+) %>% group_by(Patient) %>%
+  dplyr::summarize(
+    mean_T_Cell_Expression = mean(T_Cell, na.rm = TRUE),
+    mean_T_CD8_Expression = mean(T_CD8, na.rm = TRUE),
+    mean_T_CD4_Expression = mean(T_CD4, na.rm = TRUE),
+    mean_T_Cell_Exhaustion_Expression = mean(Tirosh_T_Cell_Exhaustion, na.rm = TRUE)
+  )
+
+Kurten.2021.T.Cells <- subset(Kurten.2021.Seurat, subset = cell_type == "T_cell")
+Kurten.2021.T.Cells.PD1.Expression <- FetchData(Kurten.2021.T.Cells, vars = "PDCD1", layer = "data")
+
+Kurten.2021.T.Cells.PD1.Stats <- data.frame(
+  Patient = Kurten.2021.T.Cells@meta.data$Patient,
+  PD1 = Kurten.2021.T.Cells.PD1.Expression$PDCD1
+) %>% group_by(Patient) %>%
+  dplyr::summarize(mean_PD1_T_Cells = mean(PD1, na.rm = TRUE),
+                   median_PD1_T_Cells = median(PD1, na.rm = TRUE),
+                   quartile_PD1_T_Cells = quantile(PD1, probs = 0.75, na.rm = TRUE))
+
+# Merging data frames for plotting
+Kurten.2021.Merged <- Kurten.2021.AXL.Stats.Macrophages %>%
+  inner_join(Kurten.2021.Signatures.Correlations, by = "Patient") %>%
+  inner_join(Kurten.2021.T.Cells.PD1.Stats, by = "Patient")
+
+# Creating the plot
+library(ggplot2)
+library(reshape2)
+
+# Reshaping data for easier plotting with multiple Y values
+Kurten.2021.Plot.Data <- Kurten.2021.Merged %>%
+  select(
+    Patient, mean_correlation_score_from_axl_signature, 
+    mean_T_Cell_Expression, mean_T_CD8_Expression, mean_T_CD4_Expression,
+    mean_T_Cell_Exhaustion_Expression, mean_PD1_T_Cells, median_PD1_T_Cells, quartile_PD1_T_Cells
+  ) %>%
+  melt(id.vars = c("Patient", "mean_correlation_score_from_axl_signature"), 
+       variable.name = "Metric", value.name = "Value")
+
+# Plotting
+p4 <- ggplot(Kurten.2021.Plot.Data, aes(x = mean_correlation_score_from_axl_signature, y = Value, color = Metric)) +
+  geom_point(size = 2) +  # Add points for each data point
+  geom_smooth(method = "lm", se = FALSE, aes(group = Metric), size = 1) +  # Add best-fitting lines (linear model)
+  labs(
+    title = "Best-Fitting Lines for Expression Metrics",
+    x = "mean_correlation_score_from_axl_signature",
+    y = "Expression Value",
+    color = "Expression Metric"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+p5 <- ggplot(Kurten.2021.Plot.Data, aes(x = mean_correlation_score_from_axl_signature, y = Value, color = Metric)) +
+  geom_line(aes(group = Metric), size = 1) +  # Add lines connecting points for each metric
+  geom_point(size = 2) +                     # Add points for each data point
+  labs(
+    title = "Expression Metrics by mean_correlation_score_from_axl_signature",
+    x = "mean_correlation_score_from_axl_signature",
+    y = "Expression Value",
+    color = "Expression Metric"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+ggsave(file.path(OUTPUT_DIR_PATH, "plot4_bestfit_lines.png"), plot = p4, width = 8, height = 6, dpi = 300)
+ggsave(file.path(OUTPUT_DIR_PATH, "plot5_connected_lines.png"), plot = p5, width = 8, height = 6, dpi = 300)
+```
+
