@@ -1,17 +1,39 @@
 #!/usr/bin/env Rscript
 
+# Rank genes per patient using pseudobulk matrices from createPseudobulkMatrix.R
+#
+# Run order:
+#   1. Rscript createPseudobulkMatrix.R
+#   2. Rscript scDiffCom-Preprocess-RankGenes.R --dataset_name Kurten_HNSC
+#
+# R libs (if optparse missing from plain Rscript):
+#   export R_LIBS_SITE=/gpfs0/bgu-ofircohen/group/R_packages/R_4.5.0
+#   or source groupRprofile in ~/.Rprofile
+
 suppressPackageStartupMessages({
   library(optparse)
-  library(dplyr)
   library(purrr)
 })
+
+args0 <- commandArgs(trailingOnly = FALSE)
+file_arg <- grep("^--file=", args0, value = TRUE)
+script_dir <- if (length(file_arg)) {
+  dirname(normalizePath(sub("^--file=", "", file_arg[1]), winslash = "/", mustWork = FALSE))
+} else {
+  normalizePath(".", winslash = "/")
+}
+source(file.path(script_dir, "rankGenesSplitUtils.R"))
 
 option_list <- list(
   make_option("--dataset_name", type = "character", default = NULL,
               help = "Dataset directory name (e.g. Kurten_HNSC)", metavar = "character"),
   make_option("--input_dir", type = "character",
-              default = "~/Thesis/CCC/outputs/RData_objects/Datasets_metrics",
-              help = "Directory containing the compiled gene×patient matrix .rds [default %default]",
+              default = "~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix",
+              help = paste0(
+                "Directory with pseudobulk .rds files (*",
+                PSEUDOBULK_MATRIX_SUFFIX,
+                ") [default %default]"
+              ),
               metavar = "character"),
   make_option("--output_base", type = "character",
               default = "~/CCC-PreProcess/results-RankGenes",
@@ -29,105 +51,47 @@ if (is.null(opt$dataset_name) || opt$dataset_name == "") {
 
 input_dir <- path.expand(opt$input_dir)
 output_base <- path.expand(opt$output_base)
+in_path <- resolve_pseudobulk_path(opt$dataset_name, input_dir)
 
-in_candidates <- c(
-  file.path(input_dir, paste0(opt$dataset_name, "_gene_by_patient_means_exp.rds")),
-  file.path(input_dir, paste0(opt$dataset_name, "_gene_by_patient_mean_expr.rds"))
-)
-in_path <- in_candidates[file.exists(in_candidates)][1]
-
-if (is.na(in_path) || is.null(in_path)) {
-  stop(
-    "Error: Could not find input .rds for dataset '", opt$dataset_name, "'. Tried:\n",
-    paste(" -", in_candidates, collapse = "\n")
+if (!grepl(PSEUDOBULK_MATRIX_SUFFIX, in_path, fixed = TRUE)) {
+  warning(
+    "Using legacy gene×patient matrix (not pseudobulk): ", in_path,
+    call. = FALSE, immediate. = TRUE
   )
 }
 
 out_dir <- file.path(output_base, opt$dataset_name)
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-message("Loading gene×patient matrix: ", in_path)
-x <- readRDS(in_path)
+message("Loading gene×patient pseudobulk matrix: ", in_path)
+mat <- load_gene_patient_matrix(in_path)
 
-mat <- if (is.data.frame(x)) {
-  m <- as.matrix(x)
-  if (!is.null(rownames(x))) rownames(m) <- rownames(x)
-  m
-} else if (is.matrix(x)) {
-  x
-} else {
-  stop("Input must be a matrix or data.frame. Got: ", paste(class(x), collapse = ", "))
-}
-
-if (is.null(rownames(mat)) || anyNA(rownames(mat)) || any(rownames(mat) == "")) {
-  stop("Input matrix must have non-empty rownames (gene symbols).")
-}
-if (is.null(colnames(mat)) || anyNA(colnames(mat)) || any(colnames(mat) == "")) {
-  stop("Input matrix must have non-empty colnames (patient_ids).")
-}
-
-storage.mode(mat) <- "double"
-
-message("Ranking genes within each patient (column-wise ranks).")
-rank_mat <- NULL
-if (requireNamespace("matrixStats", quietly = TRUE) &&
-    exists("colRanks", where = asNamespace("matrixStats"), inherits = FALSE)) {
-  # Highest expression gets the highest rank.
-  rank_mat <- matrixStats::colRanks(
-    mat,
-    ties.method = "average",
-    preserveShape = TRUE,
-    na.last = "keep"
-  )
-} else {
-  message("Note: matrixStats::colRanks not available; falling back to apply(..., 2, rank).")
-  rank_mat <- apply(
-    mat,
-    2,
-    function(v) rank(v, ties.method = "average", na.last = "keep")
-  )
-}
-
+message("Ranking genes within each patient from pseudobulk expression (column-wise ranks).")
+rank_mat <- compute_rank_matrix(mat)
 stopifnot(identical(dim(rank_mat), dim(mat)))
 
 patients <- colnames(mat)
 genes <- rownames(mat)
 
-assign_tertiles <- function(scores) {
-  ok <- !is.na(scores)
-  n_ok <- sum(ok)
-  out <- rep(NA_character_, length(scores))
+message("Building patient tertile splits for all genes ...")
+splits_df <- build_patient_splits_matrix(mat, rank_mat = rank_mat)
 
-  if (n_ok == 0) return(out)
-  if (length(unique(scores[ok])) == 1L) {
-    out[ok] <- "MID"
-    return(out)
-  }
-
-  r <- rank(scores[ok], ties.method = "average")
-  out_ok <- ifelse(
-    r <= n_ok / 3, "LOW",
-    ifelse(r > 2 * n_ok / 3, "HIGH", "MID")
-  )
-  out[ok] <- out_ok
-  out
-}
+splits_path <- file.path(out_dir, paste0(opt$dataset_name, ALL_SPLITS_SUFFIX))
+saveRDS(splits_df, splits_path)
+message("Saved all patient splits: ", splits_path)
 
 write_one_gene <- function(i) {
   gene <- genes[[i]]
   out_path <- file.path(out_dir, paste0(gene, "_", opt$dataset_name, "_grouped.rds"))
   if (!opt$overwrite && file.exists(out_path)) return(invisible(NULL))
 
-  mean_expr <- mat[i, ]
-  groups <- assign_tertiles(rank_mat[i, ])
-
   df <- data.frame(
     patient_id = patients,
-    mean_expr = as.numeric(mean_expr),
+    mean_expr = as.numeric(mat[i, ]),
     stringsAsFactors = FALSE
   )
   exp_col <- paste0(gene, "_EXP")
-  df[[exp_col]] <- groups
+  df[[exp_col]] <- splits_df[i, ]
 
   df <- df[, c("patient_id", "mean_expr", exp_col)]
   saveRDS(df, out_path)
@@ -137,4 +101,3 @@ write_one_gene <- function(i) {
 message("Writing per-gene grouped .rds files to: ", out_dir)
 invisible(purrr::walk(seq_along(genes), write_one_gene))
 message("Done.")
-
