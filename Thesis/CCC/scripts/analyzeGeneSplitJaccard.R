@@ -7,16 +7,23 @@
 #   2. Rscript scDiffCom-Preprocess-RankGenes.R --dataset_name Kurten_HNSC
 #   3. Rscript analyzeGeneSplitJaccard.R --dataset_name Kurten_HNSC --mode panel
 #
+# Requires: optparse, pheatmap
 # R libraries (if packages missing from plain Rscript):
 #   export R_LIBS_SITE=/gpfs0/bgu-ofircohen/group/R_packages/R_4.5.0
 #   or uncomment source("/gpfs0/bgu-ofircohen/group/groupRprofile") in ~/.Rprofile
 #
 # Modes:
-#   panel — scDiffCom gene panel (~120 genes): full Jaccard matrix + heatmap
+#   panel — first 100 genes from panel list: Jaccard matrix + readable heatmap
 #   all   — all genes: duplicate-split clusters; full matrix only if <= max_genes_full_matrix
+
+PANEL_MAX_GENES <- 123L
 
 suppressPackageStartupMessages({
   library(optparse)
+  if (!requireNamespace("pheatmap", quietly = TRUE)) {
+    stop("Package 'pheatmap' is required. Install with install.packages(\"pheatmap\").")
+  }
+  library(pheatmap)
 })
 
 args0 <- commandArgs(trailingOnly = FALSE)
@@ -29,7 +36,7 @@ script_dir <- if (length(file_arg)) {
 source(file.path(script_dir, "rankGenesSplitUtils.R"))
 
 DEFAULT_GENE_PANEL_RDS <- path.expand(
-  "~/Thesis/CCC/outputs/data/scDiffCom_gene_panel.rds"
+  "~/Thesis/CCC/outputs/RData_objects/GenesLists/Complexes.Oncogenes.OncoKB.Cosmic.NCG.rds"
 )
 
 option_list <- list(
@@ -98,6 +105,14 @@ load_splits_for_analysis <- function() {
     load_panel_genes()
   }
 
+  if (mode == "panel" && length(panel_genes) > PANEL_MAX_GENES) {
+    message(
+      "Panel mode: using first ", PANEL_MAX_GENES, " of ",
+      length(panel_genes), " genes (list order preserved)."
+    )
+    panel_genes <- panel_genes[seq_len(PANEL_MAX_GENES)]
+  }
+
   if (file.exists(all_splits_path)) {
     message("Loading cached all-patient splits: ", all_splits_path)
     all_splits <- readRDS(all_splits_path)
@@ -113,7 +128,7 @@ load_splits_for_analysis <- function() {
           call. = FALSE, immediate. = TRUE
         )
       }
-      return(all_splits[keep, , drop = FALSE])
+      return(all_splits[intersect(panel_genes, keep), , drop = FALSE])
     }
     return(all_splits)
   }
@@ -130,7 +145,7 @@ load_splits_for_analysis <- function() {
         nrow(splits), " genes.", call. = FALSE, immediate. = TRUE
       )
     }
-    return(splits)
+    return(splits[intersect(panel_genes, rownames(splits)), , drop = FALSE])
   }
 
   message("Recomputing splits from pseudobulk (all genes) ...")
@@ -194,21 +209,29 @@ if (compute_full_matrix) {
     saveRDS(hc, file.path(out_dir, "gene_clusters.rds"))
   }
 
-  if (requireNamespace("pheatmap", quietly = TRUE)) {
-    png(file.path(out_dir, "jaccard_heatmap.png"), width = 1200, height = 1100, res = 120)
-    pheatmap::pheatmap(
-      J,
-      cluster_rows = hc,
-      cluster_cols = hc,
-      main = paste0(opt$dataset_name, ": Jaccard similarity of patient splits"),
-      fontsize_row = max(4, min(8, 80 / sqrt(G))),
-      fontsize_col = max(4, min(8, 80 / sqrt(G)))
+  D_plot <- dist_mat
+  diag(D_plot) <- NA_real_
+
+  heatmap_path <- file.path(out_dir, "jaccard_heatmap.png")
+  label_fs <- max(4, 200 / nrow(D_plot))
+
+  png(heatmap_path, width = 4000, height = 4000, res = 300)
+  pheatmap(
+    D_plot,
+    color           = colorRampPalette(c("#d73027", "white", "#4575b4"))(100),
+    breaks = seq(0, 1, length.out = 101),
+    na_col = "#E8E8E8",
+    cluster_rows = if (isTRUE(opt$no_cluster)) FALSE else (if (is.null(hc)) TRUE else hc),
+    cluster_cols = if (isTRUE(opt$no_cluster)) FALSE else (if (is.null(hc)) TRUE else hc),
+    fontsize_row = label_fs,
+    fontsize_col = label_fs,
+    angle_col = 45,
+    main = paste0(
+      opt$dataset_name, " – Gene-Gene Jaccard Split Distance (n=", G, ")"
     )
-    dev.off()
-    message("Wrote heatmap: ", file.path(out_dir, "jaccard_heatmap.png"))
-  } else {
-    message("Install pheatmap for heatmap output; skipping jaccard_heatmap.png")
-  }
+  )
+  dev.off()
+  message("Wrote heatmap (pheatmap, distance): ", heatmap_path)
 } else {
   message(
     "Skipping full Jaccard matrix (G=", G, " > max_genes_full_matrix=",
@@ -232,5 +255,8 @@ if (compute_full_matrix) {
 
 # Save splits used for reproducibility
 saveRDS(splits, file.path(out_dir, paste0(opt$dataset_name, "_splits_used.rds")))
+if (mode == "panel") {
+  writeLines(rownames(splits), file.path(out_dir, "panel_genes_used.txt"))
+}
 
 message("Done. Outputs in: ", out_dir)
