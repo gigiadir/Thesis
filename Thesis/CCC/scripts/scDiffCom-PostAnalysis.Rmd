@@ -688,6 +688,90 @@ build_gene_cci_sets <- function(malignant_list, top_n = TOP_N_CCI) {
   })
 }
 
+build_cci_logfc_mat <- function(malignant_list, min_genes = MIN_GENES_PER_CCI) {
+  cci_list <- lapply(names(malignant_list), function(gene) {
+    malignant_list[[gene]] %>%
+      select(CCI, LOGFC) %>%
+      group_by(CCI) %>%
+      summarise(LOGFC = mean(LOGFC, na.rm = TRUE), .groups = "drop") %>%
+      mutate(Gene = gene)
+  })
+
+  all_data <- bind_rows(cci_list)
+  mat_long <- all_data %>%
+    pivot_wider(names_from = Gene, values_from = LOGFC)
+
+  mat <- as.matrix(mat_long[, -1])
+  rownames(mat) <- mat_long$CCI
+  message("  Matrix dimensions (CCIs x Genes): ", nrow(mat), " x ", ncol(mat))
+
+  n_non_na <- rowSums(!is.na(mat))
+  mat <- mat[n_non_na >= min_genes, , drop = FALSE]
+  message("  After filtering sparse CCIs: ", nrow(mat), " x ", ncol(mat))
+  mat
+}
+
+# Build Gene×Dataset × CCI logFC matrix (NA where CCI absent for that gene×dataset).
+build_gene_dataset_cci_feat_mat <- function(cci_mats, cancer_map) {
+  all_ccis <- sort(unique(unlist(lapply(cci_mats, rownames))))
+  gd_rows <- purrr::imap(cci_mats, function(mat, ds) {
+    gene_names <- colnames(mat)
+    lapply(gene_names, function(g) {
+      vec <- setNames(rep(NA_real_, length(all_ccis)), all_ccis)
+      present <- rownames(mat)[!is.na(mat[, g])]
+      vec[present] <- mat[present, g]
+      list(
+        label   = paste0(g, "_", ds),
+        gene    = g,
+        dataset = ds,
+        cancer  = cancer_map[[ds]],
+        vec     = vec
+      )
+    })
+  }) %>% purrr::flatten()
+
+  non_empty <- sapply(gd_rows, function(x) any(!is.na(x$vec)))
+  gd_rows   <- gd_rows[non_empty]
+
+  feat_mat <- do.call(rbind, lapply(gd_rows, `[[`, "vec"))
+  rownames(feat_mat) <- vapply(gd_rows, `[[`, "", "label")
+
+  list(
+    feat_mat    = feat_mat,
+    all_ccis    = all_ccis,
+    labels_gd   = vapply(gd_rows, `[[`, "", "label"),
+    genes_gd    = vapply(gd_rows, `[[`, "", "gene"),
+    datasets_gd = vapply(gd_rows, `[[`, "", "dataset"),
+    cancer_gd   = vapply(gd_rows, `[[`, "", "cancer")
+  )
+}
+
+# HVG CCIs by cross Gene×Dataset logFC variance (matches post-analysis-hvg-ccis).
+select_hvg_ccis <- function(malignant_by_ds, cancer_map,
+                            top_pct = 0.05, min_obs = 10) {
+  cci_mats <- lapply(malignant_by_ds, build_cci_logfc_mat)
+  feat_mat <- build_gene_dataset_cci_feat_mat(cci_mats, cancer_map)$feat_mat
+  n_obs_per_cci <- colSums(!is.na(feat_mat))
+  cci_var <- apply(feat_mat, 2, function(x) var(x, na.rm = TRUE))
+  cci_var[n_obs_per_cci < min_obs] <- NA_real_
+  eligible <- !is.na(cci_var)
+  if (!any(eligible)) {
+    stop("No CCIs passed min_obs filter for HVG selection.")
+  }
+  var_cutoff <- quantile(cci_var[eligible], probs = 1 - top_pct, na.rm = TRUE)
+  hvg <- names(cci_var)[eligible & cci_var >= var_cutoff]
+  list(
+    hvg         = hvg,
+    n_eligible  = sum(eligible),
+    var_cutoff  = var_cutoff,
+    cci_var     = cci_var
+  )
+}
+
+restrict_ccis_to_hvg <- function(ccis, hvg_ccis) {
+  ccis[ccis %in% hvg_ccis]
+}
+
 # jaccard_dist: scalar Jaccard distance between two character-vector CCI sets.
 jaccard_dist <- function(set_a, set_b) {
   inter <- length(intersect(set_a, set_b))
@@ -795,12 +879,12 @@ message("Genes in Bill:     ", length(Bill_top_cci_sets))
 
 # ── COMBINED CCI SET LIST (used by all downstream chunks) ─────────────────────
 all_top_cci_sets <- list(
-  Bassez2021_Breast_step4   = Bassez_top_cci_sets,
-  Qian2020_Breast_step4     = Qian_top_cci_sets,
-  Wu2021_Breast_step4       = Wu_top_cci_sets,
-  Chan2021_Lung_step4       = Chan_top_cci_sets,
-  Laughney2020_Lung_step4   = Laughney_top_cci_sets,
-  Xing2021_Lung_step4       = Xing_top_cci_sets,
+  # Bassez2021_Breast_step4   = Bassez_top_cci_sets,
+  # Qian2020_Breast_step4     = Qian_top_cci_sets,
+  # Wu2021_Breast_step4       = Wu_top_cci_sets,
+  # Chan2021_Lung_step4       = Chan_top_cci_sets,
+  # Laughney2020_Lung_step4   = Laughney_top_cci_sets,
+  # Xing2021_Lung_step4       = Xing_top_cci_sets,
   Kurten_HNSC               = Kurten_top_cci_sets,
   Puram_HNSC                = Puram_top_cci_sets,
   Choi_HNSC                 = Choi_top_cci_sets,
@@ -808,12 +892,12 @@ all_top_cci_sets <- list(
 )
 
 # ── RANKED CCI SETS (full list, no truncation — used by Average Overlap) ─────
-Bassez_cci_sets_ranked   <- build_gene_cci_sets(Bassez2021_Breast_step4.malignant,   top_n = NULL)
-Qian_cci_sets_ranked     <- build_gene_cci_sets(Qian2020_Breast_step4.malignant,     top_n = NULL)
-Wu_cci_sets_ranked       <- build_gene_cci_sets(Wu2021_Breast_step4.malignant,       top_n = NULL)
-Chan_cci_sets_ranked     <- build_gene_cci_sets(Chan2021_Lung_step4.malignant,       top_n = NULL)
-Laughney_cci_sets_ranked <- build_gene_cci_sets(Laughney2020_Lung_step4.malignant,   top_n = NULL)
-Xing_cci_sets_ranked     <- build_gene_cci_sets(Xing2021_Lung_step4.malignant,       top_n = NULL)
+# Bassez_cci_sets_ranked   <- build_gene_cci_sets(Bassez2021_Breast_step4.malignant,   top_n = NULL)
+# Qian_cci_sets_ranked     <- build_gene_cci_sets(Qian2020_Breast_step4.malignant,     top_n = NULL)
+# Wu_cci_sets_ranked       <- build_gene_cci_sets(Wu2021_Breast_step4.malignant,       top_n = NULL)
+# Chan_cci_sets_ranked     <- build_gene_cci_sets(Chan2021_Lung_step4.malignant,       top_n = NULL)
+# Laughney_cci_sets_ranked <- build_gene_cci_sets(Laughney2020_Lung_step4.malignant,   top_n = NULL)
+# Xing_cci_sets_ranked     <- build_gene_cci_sets(Xing2021_Lung_step4.malignant,       top_n = NULL)
 Kurten_cci_sets_ranked   <- build_gene_cci_sets(Kurten_HNSC.malignant,               top_n = NULL)
 Puram_cci_sets_ranked    <- build_gene_cci_sets(Puram_HNSC.malignant,                top_n = NULL)
 Choi_cci_sets_ranked     <- build_gene_cci_sets(Choi_HNSC.malignant,                 top_n = NULL)
@@ -1424,6 +1508,8 @@ if (length(goi_labels) >= 2) {
 ```{r gene-gene-clustering}
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 TOP_N_GENES <- 400  # genes ranked by total union CCI count
+GENE_GENE_TOP_VAR_CCI_PCT <- 0.05   # top X% CCIs by Gene×Dataset logFC variance (HVG)
+GENE_GENE_MIN_OBS_PER_CCI <- 10      # min non-NA Gene×Dataset rows per CCI for HVG ranking
 GENE_GENE_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
 for (GENE_GENE_CANCER_FILTER in GENE_GENE_CANCER_FILTER_OPTIONS) {
 message("\n===== GENE_GENE_CANCER_FILTER: ", GENE_GENE_CANCER_FILTER, " =====")
@@ -1441,6 +1527,30 @@ if (!GENE_GENE_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
 message("Gene–Gene matrix using datasets (", GENE_GENE_CANCER_FILTER, "): ",
         paste(names(included_cci_sets), collapse = ", "))
 
+# HVG CCIs from logFC space (same logic as post-analysis-hvg-ccis).
+malignant_for_hvg <- setNames(
+  lapply(names(included_cci_sets), function(ds) {
+    obj_name <- paste0(ds, ".malignant")
+    if (!exists(obj_name, inherits = TRUE)) {
+      stop("Missing ", obj_name, " — required for gene–gene HVG CCI selection.")
+    }
+    get(obj_name, inherits = TRUE)
+  }),
+  names(included_cci_sets)
+)
+hvg_sel <- select_hvg_ccis(
+  malignant_for_hvg,
+  ds_cancer_map[names(malignant_for_hvg)],
+  top_pct = GENE_GENE_TOP_VAR_CCI_PCT,
+  min_obs = GENE_GENE_MIN_OBS_PER_CCI
+)
+gene_gene_hvg_ccis <- hvg_sel$hvg
+message(sprintf(
+  "Gene–gene HVG CCIs: %d / %d eligible (top %.0f%% by variance, cutoff = %.4f)",
+  length(gene_gene_hvg_ccis), hvg_sel$n_eligible,
+  GENE_GENE_TOP_VAR_CCI_PCT * 100, hvg_sel$var_cutoff
+))
+
 all_gene_names <- sort(unique(unlist(lapply(included_cci_sets, names))))
 gene_cci_union <- setNames(
   lapply(all_gene_names, function(g) {
@@ -1448,8 +1558,9 @@ gene_cci_union <- setNames(
   }),
   all_gene_names
 )
+gene_cci_union <- lapply(gene_cci_union, restrict_ccis_to_hvg, hvg_ccis = gene_gene_hvg_ccis)
 gene_cci_union <- Filter(function(x) length(x) > 0, gene_cci_union)
-message("Genes with at least one CCI (union): ", length(gene_cci_union))
+message("Genes with at least one HVG CCI (union): ", length(gene_cci_union))
 
 # ── 2. Top N genes by union CCI count ─────────────────────────────────────────
 cci_counts <- sapply(gene_cci_union, length)
@@ -1533,7 +1644,7 @@ heatmap_args <- list(
   fontsize_col    = max(4, 120 / length(top_genes)),
   angle_col       = "45",
   main            = sprintf(
-    "Gene–Gene Jaccard Distance — (%s)",
+    "Gene–Gene Jaccard Distance — HVG CCIs only (%s)",
     if (GENE_GENE_CANCER_FILTER == "All") "consensus across all datasets"
     else paste0(GENE_GENE_CANCER_FILTER, " datasets only"))
 )
@@ -1570,7 +1681,8 @@ gene_cci_consensus_ranked <- setNames(
       group_by(CCI) %>%
       summarise(n_datasets = n(), mean_rank = mean(rank_pos), .groups = "drop") %>%
       arrange(desc(n_datasets), mean_rank) %>%
-      pull(CCI)
+      pull(CCI) %>%
+      restrict_ccis_to_hvg(gene_gene_hvg_ccis)
   }),
   top_genes
 )
@@ -1618,7 +1730,7 @@ ao_heatmap_args <- list(
   fontsize_col    = max(4, 120 / length(top_genes)),
   angle_col       = "45",
   main            = sprintf(
-    "Gene–Gene Average Overlap Distance — (%s)",
+    "Gene–Gene Average Overlap Distance — HVG CCIs only (%s)",
     if (GENE_GENE_CANCER_FILTER == "All") "consensus across all datasets"
     else paste0(GENE_GENE_CANCER_FILTER, " datasets only"))
 )
@@ -1675,64 +1787,6 @@ build_lri_logfc_mat <- function(malignant_list, min_genes = MIN_GENES_PER_CCI) {
   mat <- mat[n_non_na >= min_genes, , drop = FALSE]
   message("  After filtering sparse LRIs: ", nrow(mat), " x ", ncol(mat))
   mat
-}
-
-build_cci_logfc_mat <- function(malignant_list, min_genes = MIN_GENES_PER_CCI) {
-  cci_list <- lapply(names(malignant_list), function(gene) {
-    malignant_list[[gene]] %>%
-      select(CCI, LOGFC) %>%
-      group_by(CCI) %>%
-      summarise(LOGFC = mean(LOGFC, na.rm = TRUE), .groups = "drop") %>%
-      mutate(Gene = gene)
-  })
-
-  all_data <- bind_rows(cci_list)
-  mat_long <- all_data %>%
-    pivot_wider(names_from = Gene, values_from = LOGFC)
-
-  mat <- as.matrix(mat_long[, -1])
-  rownames(mat) <- mat_long$CCI
-  message("  Matrix dimensions (CCIs x Genes): ", nrow(mat), " x ", ncol(mat))
-
-  n_non_na <- rowSums(!is.na(mat))
-  mat <- mat[n_non_na >= min_genes, , drop = FALSE]
-  message("  After filtering sparse CCIs: ", nrow(mat), " x ", ncol(mat))
-  mat
-}
-
-# Build Gene×Dataset × CCI logFC matrix (NA where CCI absent for that gene×dataset).
-build_gene_dataset_cci_feat_mat <- function(cci_mats, cancer_map) {
-  all_ccis <- sort(unique(unlist(lapply(cci_mats, rownames))))
-  gd_rows <- purrr::imap(cci_mats, function(mat, ds) {
-    gene_names <- colnames(mat)
-    lapply(gene_names, function(g) {
-      vec <- setNames(rep(NA_real_, length(all_ccis)), all_ccis)
-      present <- rownames(mat)[!is.na(mat[, g])]
-      vec[present] <- mat[present, g]
-      list(
-        label   = paste0(g, "_", ds),
-        gene    = g,
-        dataset = ds,
-        cancer  = cancer_map[[ds]],
-        vec     = vec
-      )
-    })
-  }) %>% purrr::flatten()
-
-  non_empty <- sapply(gd_rows, function(x) any(!is.na(x$vec)))
-  gd_rows   <- gd_rows[non_empty]
-
-  feat_mat <- do.call(rbind, lapply(gd_rows, `[[`, "vec"))
-  rownames(feat_mat) <- vapply(gd_rows, `[[`, "", "label")
-
-  list(
-    feat_mat    = feat_mat,
-    all_ccis    = all_ccis,
-    labels_gd   = vapply(gd_rows, `[[`, "", "label"),
-    genes_gd    = vapply(gd_rows, `[[`, "", "gene"),
-    datasets_gd = vapply(gd_rows, `[[`, "", "dataset"),
-    cancer_gd   = vapply(gd_rows, `[[`, "", "cancer")
-  )
 }
 
 plot_lri_heatmap_umap <- function(malignant_list, dataset_label,
@@ -2006,7 +2060,7 @@ message("Gene × Dataset LRI UMAP saved (", LRI_UMAP_CANCER_FILTER, ")")
 # Post Analysis — Highly Variable CCIs (CCI logFC space)
 ```{r post-analysis-hvg-ccis}
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-TOP_VAR_CCI_PCT  <- 0.05   # keep top X% CCIs by cross Gene×Dataset variance
+TOP_VAR_CCI_PCT  <- 0.1   # keep top X% CCIs by cross Gene×Dataset variance
 MIN_OBS_PER_CCI  <- 10     # minimum non-NA rows per CCI to enter HVG ranking
 
 CCI_POST_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
