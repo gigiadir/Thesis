@@ -2,11 +2,15 @@
 # ------------------------------------------------------------------------------
 # scSeqCommDiff POC: Kurten_HNSC (AXL HIGH vs LOW, multi-sample)
 #
-# Prerequisites (install once):
-#   install.packages("devtools")
-#   devtools::install_gitlab("sysbiobig/scseqcomm")
-#   install.packages(c("optparse", "Seurat", "Matrix", "dplyr", "jsonlite",
-#                    "doParallel", "doRNG"))
+# Prerequisites (install once; use user library — group R_LIBS is read-only):
+#   export R_LIBS_USER="$HOME/R/x86_64-redhat-linux-gnu-library/4.5"
+#   Rscript -e 'install.packages("devtools", lib=Sys.getenv("R_LIBS_USER"))'
+#   Rscript -e 'devtools::install_gitlab("sysbiobig/scseqcomm")'
+#   (If already installed: "Skipping install ... SHA1 has not changed" is OK.)
+#   (Do not pass lib= to install_gitlab — devtools 2.4+ ignores/rejects it.)
+#
+# CClens (optional, separate command):
+#   Rscript -e 'devtools::install_gitlab("sysbiobig/cclens")'
 #
 # POC usage (interactive or single run; no batch wrapper):
 #   Rscript run_scSeqCommDiff_Kurten_HNSC.R --n_cores 4

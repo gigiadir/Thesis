@@ -208,14 +208,29 @@ Applied **after** the Tumor filter. A row is kept if `AXL` appears in `ligand` o
 ### 3.4 Running the POC
 
 ```bash
-# Install once
-R -e "devtools::install_gitlab('sysbiobig/scseqcomm')"
+# User library (required so installs go somewhere writable)
+export R_LIBS_USER="$HOME/R/x86_64-redhat-linux-gnu-library/4.5"
+
+# Install once — no lib= argument (devtools 2.4+ rejects it)
+Rscript -e 'install.packages("devtools", lib=Sys.getenv("R_LIBS_USER"), repos="https://cloud.r-project.org")'
+Rscript -e 'devtools::install_gitlab("sysbiobig/scseqcomm")'
+# "Skipping install ... SHA1 has not changed" means scSeqComm is already present.
+
+# Verify
+Rscript -e 'cat(find.package("scSeqComm"), "\n")'
 
 # Full run (memory-intensive; use subset_genes or bigmatrix if needed)
 Rscript Thesis/CCC/scripts/run_scSeqCommDiff_Kurten_HNSC.R --n_cores 4
 
 # Re-post-process existing RDS
 Rscript Thesis/CCC/scripts/run_scSeqCommDiff_Kurten_HNSC.R --skip_run
+```
+
+Optional CClens (separate install):
+
+```bash
+export R_LIBS_USER="$HOME/R/x86_64-redhat-linux-gnu-library/4.5"
+Rscript -e 'devtools::install_gitlab("sysbiobig/cclens")'
 ```
 
 **Memory fallbacks:** `--subset_genes` (L-R + TRN genes only), `--bigmatrix`, or interactive node with ≥64 GB RAM recommended for full 45k×40k matrix.

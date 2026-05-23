@@ -13,24 +13,24 @@ source("~/Thesis/CCC/scripts/utils/Utils.R")
 library(tidyverse) # Loads dplyr, tidyr, ggplot2, purrr, stringr, etc.
 library(RColorBrewer)
 library(pheatmap)
-#library(dplyr)
-#library(tidyr)
-#library(purrr)
-#library(stringr)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
 library(scDiffCom)
-#library(ggplot2)
+library(ggplot2)
 #library(ggrepel)
 library(SuperRanker)
 
 
 # BASE_RESULTS_DIR <- "~/Thesis/CCC/outputs/scDiffCom/scDiffComs/Consensus_Cell_Type"
-BASE_RESULTS_DIR <- "~/CCC-scDiffCom/results"
+BASE_RESULTS_DIR <- "~/CCC-scDiffCom/results/split-by-rank-genes"
 # MALIGNANT_CELLTYPE <- c("Epithelial", "Malignant", "Tumor", "Cancer")
 MALIGNANT_CELLTYPE <- c("Tumor")
 USE_COSINE         <- TRUE           # TRUE → cosine distance instead of correlation
 MIN_GENES_PER_CCI  <- 2              # CCIs must appear in ≥ N genes (filters sparse rows)
 # OUTPUT_DIR         <- "~/Thesis/CCC/outputs/scDiffCom/plots/v2"            # where to save output PNGs (v2 — original, no unknown-type filter)
-OUTPUT_DIR         <- "~/Thesis/CCC/outputs/scDiffCom/plots/v4"
+OUTPUT_DIR         <- "~/Thesis/CCC/outputs/scDiffCom/plots/v5-split-by-rank"
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 LRI_GO <- scDiffCom::LRI_human$LRI_curated_GO
@@ -160,10 +160,10 @@ Bill_HNSC.malignant <- lapply(
   filter.scDiffCom.cci_table_detected.for.malignant
 )
 
-my.save.RData("Kurten_HNSC.malignant", "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
-my.save.RData("Puram_HNSC.malignant",  "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
-my.save.RData("Choi_HNSC.malignant",   "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
-my.save.RData("Bill_HNSC.malignant",   "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+# my.save.RData("Kurten_HNSC.malignant", "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+# my.save.RData("Puram_HNSC.malignant",  "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+# my.save.RData("Choi_HNSC.malignant",   "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+# my.save.RData("Bill_HNSC.malignant",   "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
 
 ```
 
@@ -771,23 +771,23 @@ build_gene_dataset_ao <- function(gene, all_ranked_sets, labels = DATASET_LABELS
 }
 
 # ── BUILD PER-DATASET CCI SETS ────────────────────────────────────────────────
-Bassez_top_cci_sets   <- build_gene_cci_sets(Bassez2021_Breast_step4.malignant,   top_n = TOP_N_CCI)
-Qian_top_cci_sets     <- build_gene_cci_sets(Qian2020_Breast_step4.malignant,     top_n = TOP_N_CCI)
-Wu_top_cci_sets       <- build_gene_cci_sets(Wu2021_Breast_step4.malignant,       top_n = TOP_N_CCI)
-Chan_top_cci_sets     <- build_gene_cci_sets(Chan2021_Lung_step4.malignant,       top_n = TOP_N_CCI)
-Laughney_top_cci_sets <- build_gene_cci_sets(Laughney2020_Lung_step4.malignant,   top_n = TOP_N_CCI)
-Xing_top_cci_sets     <- build_gene_cci_sets(Xing2021_Lung_step4.malignant,       top_n = TOP_N_CCI)
+# Bassez_top_cci_sets   <- build_gene_cci_sets(Bassez2021_Breast_step4.malignant,   top_n = TOP_N_CCI)
+# Qian_top_cci_sets     <- build_gene_cci_sets(Qian2020_Breast_step4.malignant,     top_n = TOP_N_CCI)
+# Wu_top_cci_sets       <- build_gene_cci_sets(Wu2021_Breast_step4.malignant,       top_n = TOP_N_CCI)
+# Chan_top_cci_sets     <- build_gene_cci_sets(Chan2021_Lung_step4.malignant,       top_n = TOP_N_CCI)
+# Laughney_top_cci_sets <- build_gene_cci_sets(Laughney2020_Lung_step4.malignant,   top_n = TOP_N_CCI)
+# Xing_top_cci_sets     <- build_gene_cci_sets(Xing2021_Lung_step4.malignant,       top_n = TOP_N_CCI)
 Kurten_top_cci_sets   <- build_gene_cci_sets(Kurten_HNSC.malignant,               top_n = TOP_N_CCI)
 Puram_top_cci_sets    <- build_gene_cci_sets(Puram_HNSC.malignant,                top_n = TOP_N_CCI)
 Choi_top_cci_sets     <- build_gene_cci_sets(Choi_HNSC.malignant,                 top_n = TOP_N_CCI)
 Bill_top_cci_sets     <- build_gene_cci_sets(Bill_HNSC.malignant,                 top_n = TOP_N_CCI)
 
-message("Genes in Bassez:   ", length(Bassez_top_cci_sets))
-message("Genes in Qian:     ", length(Qian_top_cci_sets))
-message("Genes in Wu:       ", length(Wu_top_cci_sets))
-message("Genes in Chan:     ", length(Chan_top_cci_sets))
-message("Genes in Laughney: ", length(Laughney_top_cci_sets))
-message("Genes in Xing:     ", length(Xing_top_cci_sets))
+# message("Genes in Bassez:   ", length(Bassez_top_cci_sets))
+# message("Genes in Qian:     ", length(Qian_top_cci_sets))
+# message("Genes in Wu:       ", length(Wu_top_cci_sets))
+# message("Genes in Chan:     ", length(Chan_top_cci_sets))
+# message("Genes in Laughney: ", length(Laughney_top_cci_sets))
+# message("Genes in Xing:     ", length(Xing_top_cci_sets))
 message("Genes in Kurten:   ", length(Kurten_top_cci_sets))
 message("Genes in Puram:    ", length(Puram_top_cci_sets))
 message("Genes in Choi:     ", length(Choi_top_cci_sets))
@@ -1677,6 +1677,64 @@ build_lri_logfc_mat <- function(malignant_list, min_genes = MIN_GENES_PER_CCI) {
   mat
 }
 
+build_cci_logfc_mat <- function(malignant_list, min_genes = MIN_GENES_PER_CCI) {
+  cci_list <- lapply(names(malignant_list), function(gene) {
+    malignant_list[[gene]] %>%
+      select(CCI, LOGFC) %>%
+      group_by(CCI) %>%
+      summarise(LOGFC = mean(LOGFC, na.rm = TRUE), .groups = "drop") %>%
+      mutate(Gene = gene)
+  })
+
+  all_data <- bind_rows(cci_list)
+  mat_long <- all_data %>%
+    pivot_wider(names_from = Gene, values_from = LOGFC)
+
+  mat <- as.matrix(mat_long[, -1])
+  rownames(mat) <- mat_long$CCI
+  message("  Matrix dimensions (CCIs x Genes): ", nrow(mat), " x ", ncol(mat))
+
+  n_non_na <- rowSums(!is.na(mat))
+  mat <- mat[n_non_na >= min_genes, , drop = FALSE]
+  message("  After filtering sparse CCIs: ", nrow(mat), " x ", ncol(mat))
+  mat
+}
+
+# Build Gene×Dataset × CCI logFC matrix (NA where CCI absent for that gene×dataset).
+build_gene_dataset_cci_feat_mat <- function(cci_mats, cancer_map) {
+  all_ccis <- sort(unique(unlist(lapply(cci_mats, rownames))))
+  gd_rows <- purrr::imap(cci_mats, function(mat, ds) {
+    gene_names <- colnames(mat)
+    lapply(gene_names, function(g) {
+      vec <- setNames(rep(NA_real_, length(all_ccis)), all_ccis)
+      present <- rownames(mat)[!is.na(mat[, g])]
+      vec[present] <- mat[present, g]
+      list(
+        label   = paste0(g, "_", ds),
+        gene    = g,
+        dataset = ds,
+        cancer  = cancer_map[[ds]],
+        vec     = vec
+      )
+    })
+  }) %>% purrr::flatten()
+
+  non_empty <- sapply(gd_rows, function(x) any(!is.na(x$vec)))
+  gd_rows   <- gd_rows[non_empty]
+
+  feat_mat <- do.call(rbind, lapply(gd_rows, `[[`, "vec"))
+  rownames(feat_mat) <- vapply(gd_rows, `[[`, "", "label")
+
+  list(
+    feat_mat    = feat_mat,
+    all_ccis    = all_ccis,
+    labels_gd   = vapply(gd_rows, `[[`, "", "label"),
+    genes_gd    = vapply(gd_rows, `[[`, "", "gene"),
+    datasets_gd = vapply(gd_rows, `[[`, "", "dataset"),
+    cancer_gd   = vapply(gd_rows, `[[`, "", "cancer")
+  )
+}
+
 plot_lri_heatmap_umap <- function(malignant_list, dataset_label,
                                   k_clusters = 5,
                                   min_genes  = MIN_GENES_PER_CCI) {
@@ -1801,36 +1859,36 @@ message("\n===== LRI_UMAP_CANCER_FILTER: ", LRI_UMAP_CANCER_FILTER, " =====")
 
 # Full catalogue — filter is applied below
 .lri_all_datasets <- list(
-  Bassez2021_Breast_step4  = Bassez2021_Breast_step4.malignant,
-  Qian2020_Breast_step4    = Qian2020_Breast_step4.malignant,
-  Wu2021_Breast_step4      = Wu2021_Breast_step4.malignant,
-  Chan2021_Lung_step4      = Chan2021_Lung_step4.malignant,
-  Laughney2020_Lung_step4  = Laughney2020_Lung_step4.malignant,
-  Xing2021_Lung_step4      = Xing2021_Lung_step4.malignant,
+  # Bassez2021_Breast_step4  = Bassez2021_Breast_step4.malignant,
+  # Qian2020_Breast_step4    = Qian2020_Breast_step4.malignant,
+  # Wu2021_Breast_step4      = Wu2021_Breast_step4.malignant,
+  # Chan2021_Lung_step4      = Chan2021_Lung_step4.malignant,
+  # Laughney2020_Lung_step4  = Laughney2020_Lung_step4.malignant,
+  # Xing2021_Lung_step4      = Xing2021_Lung_step4.malignant,
   Kurten_HNSC              = Kurten_HNSC.malignant,
   Puram_HNSC               = Puram_HNSC.malignant,
   Choi_HNSC                = Choi_HNSC.malignant,
   Bill_HNSC                = Bill_HNSC.malignant
 )
 .lri_all_cancer <- c(
-  Bassez2021_Breast_step4  = "Breast",
-  Qian2020_Breast_step4    = "Breast",
-  Wu2021_Breast_step4      = "Breast",
-  Chan2021_Lung_step4      = "Lung",
-  Laughney2020_Lung_step4  = "Lung",
-  Xing2021_Lung_step4      = "Lung",
+  # Bassez2021_Breast_step4  = "Breast",
+  # Qian2020_Breast_step4    = "Breast",
+  # Wu2021_Breast_step4      = "Breast",
+  # Chan2021_Lung_step4      = "Lung",
+  # Laughney2020_Lung_step4  = "Lung",
+  # Xing2021_Lung_step4      = "Lung",
   Kurten_HNSC              = "H&N",
   Puram_HNSC               = "H&N",
   Choi_HNSC                = "H&N",
   Bill_HNSC                = "H&N"
 )
 .lri_all_colors <- c(
-  Bassez2021_Breast_step4  = "#E41A1C",
-  Qian2020_Breast_step4    = "#FF7F00",
-  Wu2021_Breast_step4      = "#4DAF4A",
-  Chan2021_Lung_step4      = "#377EB8",
-  Laughney2020_Lung_step4  = "#984EA3",
-  Xing2021_Lung_step4      = "#A65628",
+  # Bassez2021_Breast_step4  = "#E41A1C",
+  # Qian2020_Breast_step4    = "#FF7F00",
+  # Wu2021_Breast_step4      = "#4DAF4A",
+  # Chan2021_Lung_step4      = "#377EB8",
+  # Laughney2020_Lung_step4  = "#984EA3",
+  # Xing2021_Lung_step4      = "#A65628",
   Kurten_HNSC              = "#F781BF",
   Puram_HNSC               = "#999999",
   Choi_HNSC                = "#66C2A5",
@@ -1941,4 +1999,303 @@ message("Gene × Dataset LRI UMAP saved (", LRI_UMAP_CANCER_FILTER, ")")
 # Expose for inspection
 # View(umap_lri_df)
 # feat_mat  — raw Gene × Dataset LogFC matrix (imputed NAs = 0)
+```
+
+
+
+# Post Analysis — Highly Variable CCIs (CCI logFC space)
+```{r post-analysis-hvg-ccis}
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+TOP_VAR_CCI_PCT  <- 0.05   # keep top X% CCIs by cross Gene×Dataset variance
+MIN_OBS_PER_CCI  <- 10     # minimum non-NA rows per CCI to enter HVG ranking
+
+CCI_POST_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
+for (CCI_POST_CANCER_FILTER in CCI_POST_CANCER_FILTER_OPTIONS) {
+message("\n===== CCI_POST_CANCER_FILTER: ", CCI_POST_CANCER_FILTER, " =====")
+
+.cci_all_datasets <- list(
+  Kurten_HNSC = Kurten_HNSC.malignant,
+  Puram_HNSC  = Puram_HNSC.malignant,
+  Choi_HNSC   = Choi_HNSC.malignant,
+  Bill_HNSC   = Bill_HNSC.malignant
+)
+.cci_all_cancer <- c(
+  Kurten_HNSC = "H&N",
+  Puram_HNSC  = "H&N",
+  Choi_HNSC   = "H&N",
+  Bill_HNSC   = "H&N"
+)
+
+if (!CCI_POST_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
+  stop('CCI_POST_CANCER_FILTER must be one of: "All", "Breast", "Lung", "H&N"')
+{
+  keep_ds <- if (CCI_POST_CANCER_FILTER == "All") {
+    names(.cci_all_datasets)
+  } else {
+    names(.cci_all_datasets)[.cci_all_cancer[names(.cci_all_datasets)] == CCI_POST_CANCER_FILTER]
+  }
+  CCI_POST_DATASETS <- .cci_all_datasets[keep_ds]
+  CCI_POST_CANCER   <- .cci_all_cancer[keep_ds]
+}
+message("CCI post-analysis datasets (", CCI_POST_CANCER_FILTER, "): ",
+        paste(names(CCI_POST_DATASETS), collapse = ", "))
+
+# ── 1. Per-dataset CCI × Gene logFC matrices ──────────────────────────────────
+cci_mats <- lapply(CCI_POST_DATASETS, build_cci_logfc_mat)
+message("Union CCI space (before HVG): ", length(unique(unlist(lapply(cci_mats, rownames)))), " CCIs")
+
+# ── 2. Cross-cohort Gene×Dataset × CCI matrix (NA = absent) ───────────────────
+cci_feat <- build_gene_dataset_cci_feat_mat(cci_mats, CCI_POST_CANCER)
+feat_mat_cci      <- cci_feat$feat_mat
+all_ccis_union    <- cci_feat$all_ccis
+labels_gd_cci     <- cci_feat$labels_gd
+genes_gd_cci      <- cci_feat$genes_gd
+datasets_gd_cci   <- cci_feat$datasets_gd
+cancer_gd_cci     <- cci_feat$cancer_gd
+message("Gene×Dataset × CCI matrix: ", nrow(feat_mat_cci), " rows × ",
+        ncol(feat_mat_cci), " CCI columns")
+
+# ── 3. HVG selection (variance on non-NA values only) ───────────────────────
+n_obs_per_cci <- colSums(!is.na(feat_mat_cci))
+cci_var <- apply(feat_mat_cci, 2, function(x) var(x, na.rm = TRUE))
+cci_var[n_obs_per_cci < MIN_OBS_PER_CCI] <- NA_real_
+
+eligible <- !is.na(cci_var)
+if (!any(eligible)) {
+  stop("No CCIs passed MIN_OBS_PER_CCI filter for HVG selection.")
+}
+
+var_cutoff <- quantile(cci_var[eligible], probs = 1 - TOP_VAR_CCI_PCT, na.rm = TRUE)
+top_var_ccis <- names(cci_var)[eligible & cci_var >= var_cutoff]
+feat_mat_hvg <- feat_mat_cci[, top_var_ccis, drop = FALSE]
+
+message(sprintf(
+  "HVG CCIs: %d / %d eligible (top %.0f%% by variance, cutoff = %.4f)",
+  length(top_var_ccis), sum(eligible), TOP_VAR_CCI_PCT * 100, var_cutoff
+))
+
+cci_var_df <- data.frame(
+  CCI = names(cci_var),
+  variance = cci_var,
+  n_obs = n_obs_per_cci,
+  is_hvg = names(cci_var) %in% top_var_ccis,
+  stringsAsFactors = FALSE
+) %>%
+  arrange(desc(variance))
+
+cci_post_out_tag <- tolower(CCI_POST_CANCER_FILTER)
+write.csv(
+  cci_var_df,
+  file.path(OUTPUT_DIR, sprintf("cci_hvg_variance_ranking_%s.csv", cci_post_out_tag)),
+  row.names = FALSE
+)
+message("CCI variance table saved.")
+
+} # end for (CCI_POST_CANCER_FILTER)
+# NOTE: feat_mat_cci, feat_mat_hvg, top_var_ccis reflect the last filter iteration.
+# Run post-analysis-limma-batch next (uses objects from the last iteration above).
+```
+
+
+# Post Analysis — limma batch correction on CCI logFC matrix
+```{r post-analysis-limma-batch}
+library(limma)
+
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+K_CCI_UMAP  <- 15
+MINDIST_CCI <- 0.1
+
+# Re-run full CCI post pipeline per cancer filter (HVG + limma + UMAPs).
+CCI_POST_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
+TOP_VAR_CCI_PCT  <- 0.05
+MIN_OBS_PER_CCI  <- 10
+
+impute_col_mean <- function(mat) {
+  mat_imp <- mat
+  for (j in seq_len(ncol(mat_imp))) {
+    na_idx <- is.na(mat_imp[, j])
+    if (any(na_idx)) {
+      col_mean <- mean(mat_imp[, j], na.rm = TRUE)
+      if (!is.finite(col_mean)) col_mean <- 0
+      mat_imp[na_idx, j] <- col_mean
+    }
+  }
+  mat_imp
+}
+
+plot_gene_dataset_cci_umap <- function(feat_mat_input, labels, genes, datasets, cancer,
+                                      colors, title, subtitle, out_file) {
+  mat <- feat_mat_input
+  mat[is.na(mat)] <- 0
+  if (nrow(mat) < 3L || ncol(mat) < 2L) {
+    message("Skipping UMAP (", out_file, "): insufficient dimensions.")
+    return(invisible(NULL))
+  }
+  set.seed(SEED)
+  k_eff <- min(K_CCI_UMAP, nrow(mat) - 1L)
+  umap_coords <- uwot::umap(mat,
+                            n_neighbors = k_eff,
+                            min_dist    = MINDIST_CCI,
+                            metric      = "cosine")
+  umap_df <- data.frame(
+    UMAP1   = umap_coords[, 1],
+    UMAP2   = umap_coords[, 2],
+    Label   = labels,
+    Gene    = genes,
+    Dataset = datasets,
+    Cancer  = cancer,
+    stringsAsFactors = FALSE
+  )
+  p <- ggplot(umap_df, aes(x = UMAP1, y = UMAP2, colour = Dataset, shape = Cancer)) +
+    geom_point(size = 1.8, alpha = 0.5) +
+    ggrepel::geom_text_repel(aes(label = Gene),
+      size = 2.5, max.overlaps = Inf,
+      box.padding = 0.3, segment.size = 0.2, segment.alpha = 0.4,
+      show.legend = FALSE) +
+    scale_colour_manual(values = colors) +
+    scale_shape_manual(values = cancer_shapes) +
+    theme_classic(base_size = 13) +
+    labs(title = title, subtitle = subtitle,
+         colour = "Dataset", shape = "Cancer Type", x = "UMAP 1", y = "UMAP 2")
+  print(p)
+  ggsave(out_file, plot = p, width = 14, height = 10, dpi = 300)
+  message("UMAP saved to ", out_file)
+  invisible(umap_df)
+}
+
+.cci_post_colors <- c(
+  Kurten_HNSC = "#F781BF",
+  Puram_HNSC  = "#999999",
+  Choi_HNSC   = "#66C2A5",
+  Bill_HNSC   = "#FC8D62"
+)
+.cci_all_datasets <- list(
+  Kurten_HNSC = Kurten_HNSC.malignant,
+  Puram_HNSC  = Puram_HNSC.malignant,
+  Choi_HNSC   = Choi_HNSC.malignant,
+  Bill_HNSC   = Bill_HNSC.malignant
+)
+.cci_all_cancer <- c(
+  Kurten_HNSC = "H&N",
+  Puram_HNSC  = "H&N",
+  Choi_HNSC   = "H&N",
+  Bill_HNSC   = "H&N"
+)
+
+for (CCI_POST_CANCER_FILTER in CCI_POST_CANCER_FILTER_OPTIONS) {
+message("\n===== limma batch correction: ", CCI_POST_CANCER_FILTER, " =====")
+
+if (!CCI_POST_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
+  stop('CCI_POST_CANCER_FILTER must be one of: "All", "Breast", "Lung", "H&N"')
+{
+  keep_ds <- if (CCI_POST_CANCER_FILTER == "All") {
+    names(.cci_all_datasets)
+  } else {
+    names(.cci_all_datasets)[.cci_all_cancer[names(.cci_all_datasets)] == CCI_POST_CANCER_FILTER]
+  }
+  CCI_POST_DATASETS <- .cci_all_datasets[keep_ds]
+  CCI_POST_CANCER   <- .cci_all_cancer[keep_ds]
+}
+cci_mats <- lapply(CCI_POST_DATASETS, build_cci_logfc_mat)
+cci_feat <- build_gene_dataset_cci_feat_mat(cci_mats, CCI_POST_CANCER)
+feat_mat_cci    <- cci_feat$feat_mat
+labels_gd_cci   <- cci_feat$labels_gd
+genes_gd_cci    <- cci_feat$genes_gd
+datasets_gd_cci <- cci_feat$datasets_gd
+cancer_gd_cci   <- cci_feat$cancer_gd
+
+n_obs_per_cci <- colSums(!is.na(feat_mat_cci))
+cci_var <- apply(feat_mat_cci, 2, function(x) var(x, na.rm = TRUE))
+cci_var[n_obs_per_cci < MIN_OBS_PER_CCI] <- NA_real_
+eligible <- !is.na(cci_var)
+var_cutoff <- quantile(cci_var[eligible], probs = 1 - TOP_VAR_CCI_PCT, na.rm = TRUE)
+top_var_ccis <- names(cci_var)[eligible & cci_var >= var_cutoff]
+feat_mat_hvg <- feat_mat_cci[, top_var_ccis, drop = FALSE]
+message(sprintf("HVG CCIs for limma: %d / %d eligible", length(top_var_ccis), sum(eligible)))
+
+cci_post_out_tag <- tolower(CCI_POST_CANCER_FILTER)
+cci_umap_title_suffix <- if (CCI_POST_CANCER_FILTER == "All") {
+  "All Cancer Types"
+} else {
+  paste0(CCI_POST_CANCER_FILTER, " Only")
+}
+cci_umap_colors <- .cci_post_colors[unique(datasets_gd_cci)]
+
+# ── 1. limma::removeBatchEffect (column-mean imputation for NA only) ──────────
+feat_mat_hvg_na <- feat_mat_hvg
+feat_mat_hvg_imp <- impute_col_mean(feat_mat_hvg)
+
+y <- t(feat_mat_hvg_imp)
+batch <- factor(datasets_gd_cci, levels = unique(datasets_gd_cci))
+mod <- model.matrix(~ 0 + factor(genes_gd_cci))
+colnames(mod) <- make.names(colnames(mod))
+
+corrected_y <- tryCatch(
+  limma::removeBatchEffect(y, batch = batch, mod = mod),
+  error = function(e) {
+    message("removeBatchEffect with gene mod failed: ", conditionMessage(e),
+            " — falling back to mod = NULL")
+    limma::removeBatchEffect(y, batch = batch)
+  }
+)
+feat_mat_cci_corrected <- t(corrected_y)
+rownames(feat_mat_cci_corrected) <- labels_gd_cci
+message("Batch-corrected matrix: ", nrow(feat_mat_cci_corrected), " × ",
+        ncol(feat_mat_cci_corrected))
+
+saveRDS(
+  list(
+    feat_mat_cci           = feat_mat_cci,
+    feat_mat_hvg           = feat_mat_hvg,
+    feat_mat_hvg_na        = feat_mat_hvg_na,
+    feat_mat_cci_corrected = feat_mat_cci_corrected,
+    top_var_ccis           = top_var_ccis,
+    batch                  = batch,
+    labels_gd              = labels_gd_cci,
+    genes_gd               = genes_gd_cci,
+    datasets_gd            = datasets_gd_cci
+  ),
+  file.path(OUTPUT_DIR, sprintf("cci_post_analysis_matrices_%s.rds", cci_post_out_tag))
+)
+message("Post-analysis matrices saved to RDS.")
+
+# ── 2. Validation UMAPs: raw / HVG / batch-corrected ────────────────────────
+n_cci_raw <- ncol(feat_mat_cci)
+n_cci_hvg <- ncol(feat_mat_hvg)
+
+plot_gene_dataset_cci_umap(
+  feat_mat_cci, labels_gd_cci, genes_gd_cci, datasets_gd_cci, cancer_gd_cci,
+  cci_umap_colors,
+  title    = paste0("Gene × Dataset UMAP — CCI LogFC (", cci_umap_title_suffix, ")"),
+  subtitle = sprintf("Raw | %d union CCIs | NA imputed as 0 for UMAP only", n_cci_raw),
+  out_file = file.path(OUTPUT_DIR, sprintf("gene_dataset_cci_umap_raw_%s.png", cci_post_out_tag))
+)
+
+plot_gene_dataset_cci_umap(
+  feat_mat_hvg, labels_gd_cci, genes_gd_cci, datasets_gd_cci, cancer_gd_cci,
+  cci_umap_colors,
+  title    = paste0("Gene × Dataset UMAP — HVG CCIs (", cci_umap_title_suffix, ")"),
+  subtitle = sprintf("Top %.0f%% variable CCIs (%d features) | NA imputed as 0 for UMAP",
+                     TOP_VAR_CCI_PCT * 100, n_cci_hvg),
+  out_file = file.path(OUTPUT_DIR, sprintf("gene_dataset_cci_umap_hvg_%s.png", cci_post_out_tag))
+)
+
+plot_gene_dataset_cci_umap(
+  feat_mat_cci_corrected, labels_gd_cci, genes_gd_cci, datasets_gd_cci, cancer_gd_cci,
+  cci_umap_colors,
+  title    = paste0("Gene × Dataset UMAP — Batch-Corrected CCI LogFC (",
+                    cci_umap_title_suffix, ")"),
+  subtitle = sprintf("HVG (%d CCIs) + limma::removeBatchEffect(batch=dataset) | NA→0 for UMAP",
+                     n_cci_hvg),
+  out_file = file.path(OUTPUT_DIR, sprintf("gene_dataset_cci_umap_corrected_%s.png",
+                                          cci_post_out_tag))
+)
+
+} # end for (CCI_POST_CANCER_FILTER)
+
+# Expose for inspection
+# View(feat_mat_cci)
+# View(feat_mat_hvg)
+# View(feat_mat_cci_corrected)
+# top_var_ccis
 ```

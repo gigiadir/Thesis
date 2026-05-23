@@ -428,7 +428,7 @@ print(counts_table)
 
 
 
-## Data validation: expression category distribution per patient
+# Data validation: expression category distribution per patient
 
 ```{r gene-expression-category-distribution, message=FALSE, warning=FALSE}
 library(dplyr)
@@ -437,7 +437,7 @@ library(ggplot2)
 
 # For each dataset, calculate and plot the distribution of HIGH/MID/LOW calls per patient
 # across all analyzed genes.
-BASE_RESULTS_DIR <- path.expand("~/CCC-PreProcess/results")
+BASE_RESULTS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
 
 
 dataset_names <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
@@ -512,7 +512,7 @@ if (length(dataset_names) == 0) {
       scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
       scale_fill_manual(values = expr_pal, drop = FALSE) +
       labs(
-        title = paste0(ds, ": Gene expression category distribution per patient (Expression Tertile)"),
+        title = paste0(ds, ": Gene expression category distribution per patient (Patients Z-Score)"),
         x = "patient_id",
         y = "Number of analyzed genes",
         fill = "Expression\ncategory"
@@ -528,7 +528,7 @@ if (length(dataset_names) == 0) {
     qc_plot_dir <- path.expand("~/Thesis/CCC/outputs/plots/QC")
     dir.create(qc_plot_dir, recursive = TRUE, showWarnings = FALSE)
     ggsave(
-      filename = file.path(qc_plot_dir, paste0(ds, "_expression_category_distribution_per_patient.png")),
+      filename = file.path(qc_plot_dir, paste0(ds, "_zscore_expression_category_distribution_per_patient.png")),
       plot = p,
       width = 10,
       height = 6,
@@ -538,9 +538,753 @@ if (length(dataset_names) == 0) {
 }
 ```
 
+# Gene dispersion: pseudobulk expression vs patient splits
 
+Compare per-gene cross-patient dispersion in **continuous pseudobulk expression** vs **discrete HIGH/LOW/MID** patient classifications.
 
+- **Expression metric:** row-wise SD of raw pseudobulk values (not SD of row z-scores, which is ~1 by construction).
+- **Split metric:** row-wise SD of numeric-encoded labels (`LOW=1`, `MID=2`, `HIGH=3`).
 
+`SPLIT_SOURCE` selects which classification pipeline to use (or both):
+
+| Source | Meaning of split-space SD |
+|--------|---------------------------|
+| `patient_zscore` | Tertiles from row-wise z-scores of expression ([scDiffCom-Preprocess-PatientZScore.R](scDiffCom-Preprocess-PatientZScore.R)) — measures compression from tertiling expression |
+| `rankgenes` | Tertiles from within-patient ranks ([scDiffCom-Preprocess-RankGenes.R](scDiffCom-Preprocess-RankGenes.R)) — reflects patient-specific ranking, not expression variance alone |
+
+```{r gene-dispersion-expr-vs-split, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+
+# ── Config ────────────────────────────────────────────────────────────────────
+SPLIT_SOURCE <- "both"   # "patient_zscore" | "rankgenes" | "both"
+DATASETS <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
+PSEUDOBULK_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
+ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
+RANKGENES_DIR <- path.expand("~/CCC-PreProcess/results-RankGenes")
+QC_OUT_DIR <- path.expand("~/Thesis/CCC/outputs/plots/QC/gene_dispersion")
+
+split_sources <- switch(
+  SPLIT_SOURCE,
+  patient_zscore = "patient_zscore",
+  rankgenes = "rankgenes",
+  both = c("patient_zscore", "rankgenes"),
+  stop("SPLIT_SOURCE must be 'patient_zscore', 'rankgenes', or 'both'. Got: ", SPLIT_SOURCE)
+)
+
+split_source_labels <- c(
+  patient_zscore = "Patient-ZScore tertiles",
+  rankgenes = "RankGenes tertiles (within-patient rank)"
+)
+
+# ── Shared helpers (rankGenesSplitUtils.R) ────────────────────────────────────
+script_dir <- tryCatch(
+  dirname(knitr::current_input(dir = TRUE)),
+  error = function(e) NULL
+)
+if (is.null(script_dir) || !nzchar(script_dir)) {
+  script_dir <- normalizePath(".", winslash = "/")
+}
+source(file.path(script_dir, "rankGenesSplitUtils.R"))
+
+LABEL_NUM <- c(LOW = 1, MID = 2, HIGH = 3)
+
+row_dispersion <- function(mat) {
+  if (requireNamespace("matrixStats", quietly = TRUE)) {
+    return(matrixStats::rowSds(mat, na.rm = TRUE))
+  }
+  apply(mat, 1, stats::sd, na.rm = TRUE)
+}
+
+encode_splits <- function(splits_chr) {
+  out <- matrix(NA_real_, nrow = nrow(splits_chr), ncol = ncol(splits_chr),
+                dimnames = dimnames(splits_chr))
+  for (lev in names(LABEL_NUM)) {
+    out[splits_chr == lev] <- LABEL_NUM[[lev]]
+  }
+  storage.mode(out) <- "double"
+  out
+}
+
+row_dispersion_expr <- function(mat) {
+  row_dispersion(mat)
+}
+
+row_dispersion_split <- function(splits_chr) {
+  row_dispersion(encode_splits(splits_chr))
+}
+
+align_matrices <- function(expr_mat, splits_mat) {
+  genes <- intersect(rownames(expr_mat), rownames(splits_mat))
+  patients <- intersect(colnames(expr_mat), colnames(splits_mat))
+  if (length(genes) == 0L || length(patients) == 0L) {
+    return(NULL)
+  }
+  list(
+    expr = expr_mat[genes, patients, drop = FALSE],
+    splits = splits_mat[genes, patients, drop = FALSE]
+  )
+}
+
+compare_dispersion <- function(sd_expr, sd_split) {
+  n <- length(sd_expr)
+  if (is.null(names(sd_expr))) names(sd_expr) <- seq_len(n)
+  valid <- is.finite(sd_expr) & is.finite(sd_split) & sd_expr > 0
+  data.frame(
+    gene = names(sd_expr)[valid],
+    sd_expr = unname(sd_expr[valid]),
+    sd_split = unname(sd_split[valid]),
+    ratio = unname(sd_split[valid] / sd_expr[valid]),
+    stringsAsFactors = FALSE
+  )
+}
+
+load_splits_from_grouped_dir <- function(base_dir, dataset_name) {
+  ds_dir <- file.path(path.expand(base_dir), dataset_name)
+  if (!dir.exists(ds_dir)) {
+    return(NULL)
+  }
+
+  files <- list.files(
+    ds_dir,
+    pattern = paste0("_", dataset_name, "_grouped\\.rds$"),
+    full.names = TRUE
+  )
+  if (length(files) == 0L) {
+    return(NULL)
+  }
+
+  patients <- NULL
+  split_rows <- list()
+
+  for (f in files) {
+    df <- tryCatch(readRDS(f), error = function(e) NULL)
+    if (is.null(df) || !is.data.frame(df)) next
+
+    exp_col <- grep("_exp$", colnames(df), ignore.case = TRUE, value = TRUE)[1]
+    if (is.na(exp_col)) next
+
+    gene <- sub(paste0("_", dataset_name, "_grouped\\.rds$"), "", basename(f))
+    if (is.null(patients)) {
+      patients <- as.character(df$patient_id)
+    }
+    vec <- setNames(as.character(df[[exp_col]]), as.character(df$patient_id))
+    split_rows[[gene]] <- vec[patients]
+  }
+
+  if (length(split_rows) == 0L) {
+    return(NULL)
+  }
+
+  genes_found <- names(split_rows)
+  splits <- matrix(NA_character_, nrow = length(genes_found), ncol = length(patients),
+                   dimnames = list(genes_found, patients))
+  for (g in genes_found) {
+    splits[g, ] <- split_rows[[g]]
+  }
+  splits
+}
+
+load_splits_rankgenes <- function(dataset_name, rankgenes_dir, expr_mat) {
+  ds_dir <- file.path(path.expand(rankgenes_dir), dataset_name)
+  all_splits_path <- file.path(ds_dir, paste0(dataset_name, ALL_SPLITS_SUFFIX))
+
+  if (file.exists(all_splits_path)) {
+    message("  Loading RankGenes splits: ", all_splits_path)
+    return(readRDS(all_splits_path))
+  }
+
+  splits <- tryCatch(
+    load_splits_from_rankgenes_dir(rankgenes_dir, dataset_name),
+    error = function(e) NULL
+  )
+  if (!is.null(splits)) {
+    message("  Loaded RankGenes splits from grouped .rds files in ", ds_dir)
+    return(splits)
+  }
+
+  message("  RankGenes splits not found; building from pseudobulk (column-wise rank tertiles).")
+  rank_mat <- compute_rank_matrix(expr_mat)
+  build_patient_splits_matrix(expr_mat, rank_mat = rank_mat)
+}
+
+load_splits_for_source <- function(source, dataset_name, expr_mat) {
+  switch(
+    source,
+    patient_zscore = load_splits_from_grouped_dir(ZSCORE_SPLITS_DIR, dataset_name),
+    rankgenes = load_splits_rankgenes(dataset_name, RANKGENES_DIR, expr_mat),
+    stop("Unknown split source: ", source)
+  )
+}
+
+plot_dispersion_scatter <- function(cmp_df, ds, source, source_label) {
+  n_genes <- nrow(cmp_df)
+  pct_split_lt <- 100 * mean(cmp_df$sd_split < cmp_df$sd_expr)
+  pct_split_gt <- 100 * mean(cmp_df$sd_split > cmp_df$sd_expr)
+  pct_split_zero <- 100 * mean(cmp_df$sd_split == 0)
+
+  subtitle <- sprintf(
+    "%d genes | split SD < expr SD: %.1f%% | split SD > expr SD: %.1f%% | split SD = 0: %.1f%%",
+    n_genes, pct_split_lt, pct_split_gt, pct_split_zero
+  )
+
+  ggplot(cmp_df, aes(x = sd_expr, y = sd_split)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey40") +
+    geom_point(alpha = 0.35, size = 1.2, color = "#4E79A7") +
+    scale_x_continuous(trans = "log1p") +
+    scale_y_continuous(trans = "log1p") +
+    labs(
+      title = paste0(ds, ": Gene dispersion — expression vs split"),
+      subtitle = subtitle,
+      x = "Pseudobulk row SD (expression space)",
+      y = "Encoded split row SD (split space)",
+      caption = source_label
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(plot.caption = element_text(size = 9, color = "grey40"))
+}
+
+run_dispersion_stats <- function(cmp_df) {
+  wt <- wilcox.test(cmp_df$sd_split, cmp_df$sd_expr, paired = TRUE, alternative = "two.sided")
+  wt_greater <- wilcox.test(cmp_df$sd_split, cmp_df$sd_expr, paired = TRUE, alternative = "greater")
+  wt_less <- wilcox.test(cmp_df$sd_split, cmp_df$sd_expr, paired = TRUE, alternative = "less")
+  ct <- suppressWarnings(cor.test(cmp_df$sd_expr, cmp_df$sd_split, method = "spearman"))
+
+  list(
+    n_genes = nrow(cmp_df),
+    median_sd_expr = median(cmp_df$sd_expr),
+    median_sd_split = median(cmp_df$sd_split),
+    median_ratio = median(cmp_df$ratio),
+    wilcox_p = wt$p.value,
+    wilcox_p_split_gt_expr = wt_greater$p.value,
+    wilcox_p_split_lt_expr = wt_less$p.value,
+    spearman_rho = unname(ct$estimate),
+    spearman_p = ct$p.value
+  )
+}
+
+dir.create(QC_OUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+for (ds in DATASETS) {
+  message("\n=== ", ds, " ===")
+
+  pb_path <- tryCatch(
+    resolve_pseudobulk_path(ds, PSEUDOBULK_DIR),
+    error = function(e) {
+      message("  Pseudobulk not found: ", conditionMessage(e))
+      NULL
+    }
+  )
+  if (is.null(pb_path)) next
+
+  message("  Loading pseudobulk: ", pb_path)
+  expr_mat <- load_gene_patient_matrix(pb_path)
+
+  for (src in split_sources) {
+    message("  Split source: ", src, " (", split_source_labels[[src]], ")")
+
+    splits_mat <- load_splits_for_source(src, ds, expr_mat)
+    if (is.null(splits_mat)) {
+      message("  No splits found for ", src, " — skipping.")
+      next
+    }
+
+    aligned <- align_matrices(expr_mat, splits_mat)
+    if (is.null(aligned)) {
+      message("  No overlapping genes/patients between pseudobulk and splits — skipping.")
+      next
+    }
+
+    message(sprintf(
+      "  Aligned: %d genes x %d patients",
+      nrow(aligned$expr), ncol(aligned$expr)
+    ))
+
+    sd_expr <- row_dispersion_expr(aligned$expr)
+    sd_split <- row_dispersion_split(aligned$splits)
+    names(sd_expr) <- rownames(aligned$expr)
+    names(sd_split) <- rownames(aligned$splits)
+
+    cmp_df <- compare_dispersion(sd_expr, sd_split)
+    if (nrow(cmp_df) == 0L) {
+      message("  No genes with valid paired dispersion — skipping.")
+      next
+    }
+
+    stats <- run_dispersion_stats(cmp_df)
+    message(sprintf(
+      paste0(
+        "  n=%d | median SD_expr=%.4f | median SD_split=%.4f | median ratio=%.4f\n",
+        "  Wilcoxon (two-sided) p=%.2e | split>expr p=%.2e | split<expr p=%.2e\n",
+        "  Spearman rho=%.3f (p=%.2e)"
+      ),
+      stats$n_genes, stats$median_sd_expr, stats$median_sd_split, stats$median_ratio,
+      stats$wilcox_p, stats$wilcox_p_split_gt_expr, stats$wilcox_p_split_lt_expr,
+      stats$spearman_rho, stats$spearman_p
+    ))
+
+    p <- plot_dispersion_scatter(cmp_df, ds, src, split_source_labels[[src]])
+    print(p)
+
+    out_png <- file.path(QC_OUT_DIR, paste0(ds, "_", src, "_expr_vs_split_dispersion.png"))
+    ggsave(out_png, p, width = 8, height = 6, dpi = 300)
+    message("  Saved: ", out_png)
+
+    out_csv <- file.path(QC_OUT_DIR, paste0(ds, "_", src, "_expr_vs_split_dispersion.csv"))
+    write.csv(cmp_df, out_csv, row.names = FALSE)
+  }
+}
+```
+
+# Gene patient-wise profiles: PCA in expression vs split space
+
+Each **gene** is a point in patient space (dimensions = patients). Rows are row z-scored so profiles reflect **relative** highs/lows across patients, not absolute expression.
+
+- **Expression PCA:** which genes have similar pseudobulk patterns across patients.
+- **Split PCA:** which genes assign LOW/MID/HIGH to similar patients.
+- **Profile correlation** (per gene): correlation between row z-scored expression and row z-scored encoded splits. **Low correlation** → split labels do not track that gene's expression patient pattern (less informative in split space for that gene).
+
+```{r gene-profile-pca-expr-vs-split, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# ── Config (same split sources as dispersion section) ─────────────────────────
+SPLIT_SOURCE <- "both"
+DATASETS <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
+PSEUDOBULK_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
+ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
+RANKGENES_DIR <- path.expand("~/CCC-PreProcess/results-RankGenes")
+PROFILE_PCA_DIR <- path.expand("~/Thesis/CCC/outputs/plots/QC/gene_profile_pca")
+N_PC <- 2L
+MIN_PATIENTS <- 5L
+MAX_PATIENT_NA_FRAC <- 0.25   # drop patient if >25% of genes are NA (incl. all-NA columns)
+LABEL_LOW_COR_QUANTILE <- 0.10   # highlight bottom 10% expr–split profile correlation
+N_LABEL_GENES <- 12L
+
+split_sources <- switch(
+  SPLIT_SOURCE,
+  patient_zscore = "patient_zscore",
+  rankgenes = "rankgenes",
+  both = c("patient_zscore", "rankgenes"),
+  stop("SPLIT_SOURCE must be 'patient_zscore', 'rankgenes', or 'both'.")
+)
+
+split_source_labels <- c(
+  patient_zscore = "Patient-ZScore tertiles",
+  rankgenes = "RankGenes tertiles (within-patient rank)"
+)
+
+script_dir <- tryCatch(
+  dirname(knitr::current_input(dir = TRUE)),
+  error = function(e) NULL
+)
+if (is.null(script_dir) || !nzchar(script_dir)) {
+  script_dir <- normalizePath(".", winslash = "/")
+}
+source(file.path(script_dir, "rankGenesSplitUtils.R"))
+
+LABEL_NUM <- c(LOW = 1, MID = 2, HIGH = 3)
+
+encode_splits <- function(splits_chr) {
+  out <- matrix(NA_real_, nrow = nrow(splits_chr), ncol = ncol(splits_chr),
+                dimnames = dimnames(splits_chr))
+  for (lev in names(LABEL_NUM)) {
+    out[splits_chr == lev] <- LABEL_NUM[[lev]]
+  }
+  storage.mode(out) <- "double"
+  out
+}
+
+align_matrices <- function(expr_mat, splits_mat) {
+  genes <- intersect(rownames(expr_mat), rownames(splits_mat))
+  patients <- intersect(colnames(expr_mat), colnames(splits_mat))
+  if (length(genes) == 0L || length(patients) == 0L) return(NULL)
+  list(
+    expr = expr_mat[genes, patients, drop = FALSE],
+    splits = splits_mat[genes, patients, drop = FALSE]
+  )
+}
+
+row_zscore_matrix <- function(mat) {
+  if (requireNamespace("matrixStats", quietly = TRUE)) {
+    rm <- matrixStats::rowMeans2(mat, na.rm = TRUE)
+    rsd <- matrixStats::rowSds(mat, na.rm = TRUE)
+    rsd[!is.finite(rsd) | rsd == 0] <- NA_real_
+    z <- sweep(mat, 1, rm, FUN = "-")
+    z <- sweep(z, 1, rsd, FUN = "/")
+    return(z)
+  }
+  t(scale(t(mat)))
+}
+
+genes_with_usable_rows <- function(mat, min_patients = MIN_PATIENTS) {
+  apply(mat, 1, function(r) {
+    ok <- is.finite(r)
+    sum(ok) >= min_patients && stats::sd(r[ok]) > 0
+  })
+}
+
+# Drop patients (columns) that are all-NA or mostly missing across genes.
+drop_sparse_patients <- function(mat, max_na_frac = MAX_PATIENT_NA_FRAC,
+                               min_patients = MIN_PATIENTS, label = "matrix") {
+  if (ncol(mat) == 0L) return(mat)
+
+  na_frac <- colMeans(!is.finite(mat))
+  keep <- na_frac < max_na_frac
+  dropped <- colnames(mat)[!keep]
+
+  if (length(dropped) > 0L) {
+    message(sprintf(
+      "  Dropped %d patient(s) from %s (NA fraction >= %.0f%%): %s",
+      length(dropped), label, 100 * max_na_frac,
+      paste(dropped, collapse = ", ")
+    ))
+  }
+
+  mat <- mat[, keep, drop = FALSE]
+  if (ncol(mat) < min_patients) {
+    warning(
+      "Only ", ncol(mat), " patient(s) left in ", label,
+      " after NA filtering (need >= ", min_patients, ")."
+    )
+  }
+  mat
+}
+
+# Keep patients that pass coverage in both z-matrices (expr + split).
+drop_sparse_patients_pair <- function(z_expr, z_split,
+                                    max_na_frac = MAX_PATIENT_NA_FRAC,
+                                    min_patients = MIN_PATIENTS) {
+  patients <- intersect(colnames(z_expr), colnames(z_split))
+  if (length(patients) == 0L) {
+    stop("No shared patients between expression and split matrices.")
+  }
+
+  na_expr <- colMeans(!is.finite(z_expr[, patients, drop = FALSE]))
+  na_split <- colMeans(!is.finite(z_split[, patients, drop = FALSE]))
+  keep <- (na_expr < max_na_frac) & (na_split < max_na_frac)
+  dropped <- patients[!keep]
+
+  if (length(dropped) > 0L) {
+    message(sprintf(
+      "  Dropped %d patient(s) from paired PCA (NA in expr and/or split): %s",
+      length(dropped), paste(dropped, collapse = ", ")
+    ))
+  }
+
+  patients <- patients[keep]
+  if (length(patients) < min_patients) {
+    stop(
+      "Fewer than ", min_patients, " patients after paired NA filtering (",
+      length(patients), " left)."
+    )
+  }
+
+  list(
+    expr = z_expr[, patients, drop = FALSE],
+    split = z_split[, patients, drop = FALSE],
+    patients = patients
+  )
+}
+
+# Subset genes/patients for PCA; impute remaining NA with 0 (neutral z-score) if needed.
+prepare_matrix_for_pca <- function(z_mat, max_na_frac = MAX_PATIENT_NA_FRAC,
+                                   min_patients = MIN_PATIENTS,
+                                   impute_residual_na = TRUE, label = "PCA") {
+  z <- drop_sparse_patients(z_mat, max_na_frac, min_patients, label)
+
+  keep <- genes_with_usable_rows(z, min_patients)
+  z <- z[keep, , drop = FALSE]
+
+  gene_ok <- apply(z, 1, function(r) all(is.finite(r)) && stats::sd(r) > 0)
+  z_complete <- z[gene_ok, , drop = FALSE]
+
+  if (nrow(z_complete) >= 3L) {
+    return(list(z = z_complete, imputed = FALSE, n_genes = nrow(z_complete)))
+  }
+
+  if (!impute_residual_na) {
+    stop("Fewer than 3 genes with complete rows after patient filtering for ", label, ".")
+  }
+
+  n_imputed <- sum(!is.finite(z))
+  z[!is.finite(z)] <- 0
+  gene_ok <- apply(z, 1, function(r) stats::sd(r) > 0)
+  z <- z[gene_ok, , drop = FALSE]
+
+  if (nrow(z) < 3L) {
+    stop("Fewer than 3 genes with usable z-scores for ", label, " after imputation.")
+  }
+
+  if (n_imputed > 0L) {
+    message(sprintf(
+      "  %s: imputed %d NA cell(s) with 0 (neutral z-score); %d genes for PCA.",
+      label, n_imputed, nrow(z)
+    ))
+  }
+
+  list(z = z, imputed = TRUE, n_genes = nrow(z))
+}
+
+pca_genes <- function(z_mat, n_pc = N_PC, label = "PCA") {
+  prep <- prepare_matrix_for_pca(z_mat, label = label)
+  z <- prep$z
+
+  pc <- stats::prcomp(z, center = TRUE, scale. = FALSE)
+  n_pc <- min(n_pc, ncol(pc$x))
+  var_expl <- (pc$sdev^2) / sum(pc$sdev^2)
+  list(
+    coords = pc$x[, seq_len(n_pc), drop = FALSE],
+    var_expl = var_expl,
+    rotation = pc$rotation[, seq_len(n_pc), drop = FALSE],
+    n_genes = nrow(z),
+    n_patients = ncol(z),
+    imputed = prep$imputed
+  )
+}
+
+row_profile_correlation <- function(z_expr, z_split) {
+  genes <- intersect(rownames(z_expr), rownames(z_split))
+  vapply(genes, function(g) {
+    xe <- z_expr[g, ]
+    xs <- z_split[g, ]
+    ok <- is.finite(xe) & is.finite(xs)
+    if (sum(ok) < 3L) return(NA_real_)
+    suppressWarnings(stats::cor(xe[ok], xs[ok], method = "pearson"))
+  }, numeric(1))
+}
+
+load_splits_from_grouped_dir <- function(base_dir, dataset_name) {
+  ds_dir <- file.path(path.expand(base_dir), dataset_name)
+  if (!dir.exists(ds_dir)) return(NULL)
+  files <- list.files(ds_dir, pattern = paste0("_", dataset_name, "_grouped\\.rds$"),
+                      full.names = TRUE)
+  if (length(files) == 0L) return(NULL)
+  patients <- NULL
+  split_rows <- list()
+  for (f in files) {
+    df <- tryCatch(readRDS(f), error = function(e) NULL)
+    if (is.null(df) || !is.data.frame(df)) next
+    exp_col <- grep("_exp$", colnames(df), ignore.case = TRUE, value = TRUE)[1]
+    if (is.na(exp_col)) next
+    gene <- sub(paste0("_", dataset_name, "_grouped\\.rds$"), "", basename(f))
+    if (is.null(patients)) patients <- as.character(df$patient_id)
+    vec <- setNames(as.character(df[[exp_col]]), as.character(df$patient_id))
+    split_rows[[gene]] <- vec[patients]
+  }
+  if (length(split_rows) == 0L) return(NULL)
+  genes_found <- names(split_rows)
+  splits <- matrix(NA_character_, nrow = length(genes_found), ncol = length(patients),
+                   dimnames = list(genes_found, patients))
+  for (g in genes_found) splits[g, ] <- split_rows[[g]]
+  splits
+}
+
+load_splits_rankgenes <- function(dataset_name, rankgenes_dir, expr_mat) {
+  ds_dir <- file.path(path.expand(rankgenes_dir), dataset_name)
+  all_splits_path <- file.path(ds_dir, paste0(dataset_name, ALL_SPLITS_SUFFIX))
+  if (file.exists(all_splits_path)) return(readRDS(all_splits_path))
+  splits <- tryCatch(
+    load_splits_from_rankgenes_dir(rankgenes_dir, dataset_name),
+    error = function(e) NULL
+  )
+  if (!is.null(splits)) return(splits)
+  rank_mat <- compute_rank_matrix(expr_mat)
+  build_patient_splits_matrix(expr_mat, rank_mat = rank_mat)
+}
+
+load_splits_for_source <- function(source, dataset_name, expr_mat) {
+  switch(
+    source,
+    patient_zscore = load_splits_from_grouped_dir(ZSCORE_SPLITS_DIR, dataset_name),
+    rankgenes = load_splits_rankgenes(dataset_name, RANKGENES_DIR, expr_mat),
+    stop("Unknown split source: ", source)
+  )
+}
+
+build_profile_pca_df <- function(pca_res, space_label) {
+  df <- as.data.frame(pca_res$coords)
+  colnames(df) <- paste0("PC", seq_len(ncol(df)))
+  df$gene <- rownames(pca_res$coords)
+  df$space <- space_label
+  df$var_pc1 <- round(100 * pca_res$var_expl[1], 1)
+  if (length(pca_res$var_expl) >= 2L) {
+    df$var_pc2 <- round(100 * pca_res$var_expl[2], 1)
+  } else {
+    df$var_pc2 <- NA_real_
+  }
+  df
+}
+
+plot_profile_pca <- function(plot_df, df_expr, df_split, ds, source_label, cor_col = "profile_cor") {
+  low_cor_thr <- stats::quantile(plot_df[[cor_col]], probs = LABEL_LOW_COR_QUANTILE, na.rm = TRUE)
+  plot_df <- plot_df %>%
+    dplyr::mutate(
+      low_split_informativeness = !is.na(.data[[cor_col]]) &
+        .data[[cor_col]] <= low_cor_thr
+    )
+
+  label_df <- plot_df %>%
+    dplyr::filter(.data$space == "Expression", .data$low_split_informativeness) %>%
+    dplyr::arrange(.data[[cor_col]]) %>%
+    dplyr::slice_head(n = N_LABEL_GENES)
+
+  p_expr <- ggplot(
+    dplyr::filter(plot_df, .data$space == "Expression"),
+    aes(x = PC1, y = PC2, color = .data[[cor_col]])
+  ) +
+    geom_point(alpha = 0.45, size = 1.4) +
+    geom_text(
+      data = label_df, aes(label = gene),
+      size = 2.5, vjust = -0.6, check_overlap = TRUE, show.legend = FALSE
+    ) +
+    scale_color_viridis_c(option = "magma", name = "Expr–split\ncorrelation", na.value = "grey80") +
+    labs(
+      title = "Expression space",
+      subtitle = sprintf("PC1 %.1f%% | PC2 %.1f%% variance", df_expr$var_pc1[1], df_expr$var_pc2[1]),
+      x = "PC1", y = "PC2"
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(legend.position = "bottom")
+
+  p_split <- ggplot(
+    dplyr::filter(plot_df, .data$space == "Split"),
+    aes(x = PC1, y = PC2, color = .data[[cor_col]])
+  ) +
+    geom_point(alpha = 0.45, size = 1.4) +
+    scale_color_viridis_c(option = "magma", name = "Expr–split\ncorrelation", na.value = "grey80") +
+    labs(
+      title = "Split space",
+      subtitle = sprintf("PC1 %.1f%% | PC2 %.1f%% variance", df_split$var_pc1[1], df_split$var_pc2[1]),
+      x = "PC1", y = "PC2"
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(legend.position = "bottom")
+
+  (p_expr | p_split) +
+    plot_annotation(
+      title = paste0(ds, ": Gene patient-wise profiles (row z-scored)"),
+      subtitle = paste0(
+        source_label, " | dark labels = bottom ", 100 * LABEL_LOW_COR_QUANTILE,
+        "% expr–split correlation (least informative splits)"
+      ),
+      theme = theme(plot.title = element_text(face = "bold", size = 12))
+    )
+}
+
+plot_profile_cor_hist <- function(metrics_df, ds, source_label) {
+  ggplot(metrics_df, aes(x = profile_cor)) +
+    geom_histogram(bins = 40, fill = "#4E79A7", color = "white", linewidth = 0.2) +
+    geom_vline(
+      xintercept = stats::quantile(metrics_df$profile_cor, LABEL_LOW_COR_QUANTILE, na.rm = TRUE),
+      linetype = "dashed", color = "#E15759"
+    ) +
+    labs(
+      title = paste0(ds, ": Expression vs split patient-profile correlation"),
+      subtitle = source_label,
+      x = "Per-gene correlation (row z expr vs row z split)",
+      y = "Number of genes"
+    ) +
+    theme_minimal(base_size = 11)
+}
+
+dir.create(PROFILE_PCA_DIR, recursive = TRUE, showWarnings = FALSE)
+
+for (ds in DATASETS) {
+  message("\n=== Profile PCA: ", ds, " ===")
+
+  pb_path <- tryCatch(
+    resolve_pseudobulk_path(ds, PSEUDOBULK_DIR),
+    error = function(e) NULL
+  )
+  if (is.null(pb_path)) next
+
+  expr_mat <- load_gene_patient_matrix(pb_path)
+
+  for (src in split_sources) {
+    message("  Source: ", src)
+
+    splits_mat <- load_splits_for_source(src, ds, expr_mat)
+    if (is.null(splits_mat)) next
+
+    aligned <- align_matrices(expr_mat, splits_mat)
+    if (is.null(aligned)) next
+
+    # Remove sparse / all-NA patients before z-scoring (same patients for expr + splits)
+    aligned$expr <- drop_sparse_patients(aligned$expr, label = paste0(ds, " expression"))
+    if (ncol(aligned$expr) < MIN_PATIENTS) {
+      message("  Too few patients after expression NA filter — skipping.")
+      next
+    }
+    aligned$splits <- aligned$splits[, colnames(aligned$expr), drop = FALSE]
+
+    split_num <- encode_splits(aligned$splits)
+    z_expr <- row_zscore_matrix(aligned$expr)
+    z_split <- row_zscore_matrix(split_num)
+
+    z_pair <- drop_sparse_patients_pair(z_expr, z_split)
+    z_expr <- z_pair$expr
+    z_split <- z_pair$split
+    message(sprintf("  PCA / profiles use %d patients: %s",
+                    length(z_pair$patients), paste(z_pair$patients, collapse = ", ")))
+
+    profile_cor <- row_profile_correlation(z_expr, z_split)
+    profile_cor <- profile_cor[is.finite(profile_cor)]
+
+    pca_expr <- pca_genes(z_expr, label = paste0(ds, " expression"))
+    pca_split <- pca_genes(z_split, label = paste0(ds, " split"))
+
+    df_expr <- build_profile_pca_df(pca_expr, "Expression")
+    df_split <- build_profile_pca_df(pca_split, "Split")
+    plot_df <- dplyr::bind_rows(df_expr, df_split) %>%
+      dplyr::left_join(
+        data.frame(gene = names(profile_cor), profile_cor = unname(profile_cor),
+                   stringsAsFactors = FALSE),
+        by = "gene"
+      )
+
+    metrics_df <- data.frame(
+      gene = names(profile_cor),
+      profile_cor = unname(profile_cor),
+      PC1_expr = df_expr$PC1[match(names(profile_cor), df_expr$gene)],
+      PC2_expr = df_expr$PC2[match(names(profile_cor), df_expr$gene)],
+      PC1_split = df_split$PC1[match(names(profile_cor), df_split$gene)],
+      PC2_split = df_split$PC2[match(names(profile_cor), df_split$gene)],
+      stringsAsFactors = FALSE
+    ) %>%
+      dplyr::mutate(
+        pc_dist = sqrt((PC1_expr - PC1_split)^2 + (PC2_expr - PC2_split)^2),
+        low_split_informativeness = profile_cor <= stats::quantile(
+          profile_cor, LABEL_LOW_COR_QUANTILE, na.rm = TRUE
+        )
+      )
+
+    message(sprintf(
+      "  %d genes | median expr–split cor = %.3f | %.1f%% below Q%.0f",
+      nrow(metrics_df),
+      median(metrics_df$profile_cor),
+      100 * mean(metrics_df$low_split_informativeness),
+      100 * LABEL_LOW_COR_QUANTILE
+    ))
+
+    p_pca <- plot_profile_pca(
+      plot_df, df_expr, df_split, ds, split_source_labels[[src]]
+    )
+    print(p_pca)
+
+    p_hist <- plot_profile_cor_hist(metrics_df, ds, split_source_labels[[src]])
+    print(p_hist)
+
+    prefix <- file.path(PROFILE_PCA_DIR, paste0(ds, "_", src))
+    ggsave(paste0(prefix, "_gene_profile_pca.png"), p_pca, width = 14, height = 6, dpi = 300)
+    ggsave(paste0(prefix, "_profile_cor_hist.png"), p_hist, width = 8, height = 5, dpi = 300)
+    write.csv(metrics_df, paste0(prefix, "_gene_profile_metrics.csv"), row.names = FALSE)
+    write.csv(plot_df, paste0(prefix, "_gene_profile_pca_coords.csv"), row.names = FALSE)
+    message("  Saved outputs under ", PROFILE_PCA_DIR)
+  }
+}
+```
 
 #Menachem Playground
 ```{r}

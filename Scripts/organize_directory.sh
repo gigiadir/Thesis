@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define the target directory
-TARGET_DIR="/gpfs0/bgu-ofircohen/users/gigiadir/CCC-scDiffCom/results"
+TARGET_DIR="/gpfs0/bgu-ofircohen/users/gigiadir/CCC-scDiffCom/results/split-by-rank-genes"
 
 # Navigate to the directory
 cd "$TARGET_DIR" || { echo "Directory not found"; exit 1; }
