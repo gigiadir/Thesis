@@ -7,23 +7,24 @@
 #   2. Rscript scDiffCom-Preprocess-RankGenes.R --dataset_name Kurten_HNSC
 #   3. Rscript analyzeGeneSplitJaccard.R --dataset_name Kurten_HNSC --mode panel
 #
-# Requires: optparse, pheatmap
+# Requires: optparse, ggplot2, ggrepel
 # R libraries (if packages missing from plain Rscript):
 #   export R_LIBS_SITE=/gpfs0/bgu-ofircohen/group/R_packages/R_4.5.0
 #   or uncomment source("/gpfs0/bgu-ofircohen/group/groupRprofile") in ~/.Rprofile
 #
 # Modes:
-#   panel — first 100 genes from panel list: Jaccard matrix + readable heatmap
+#   panel — 123-gene scDiffCom panel: Jaccard matrix + MDS plot
 #   all   — all genes: duplicate-split clusters; full matrix only if <= max_genes_full_matrix
-
-PANEL_MAX_GENES <- 123L
 
 suppressPackageStartupMessages({
   library(optparse)
-  if (!requireNamespace("pheatmap", quietly = TRUE)) {
-    stop("Package 'pheatmap' is required. Install with install.packages(\"pheatmap\").")
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("Package 'ggplot2' is required. Install with install.packages(\"ggplot2\").")
   }
-  library(pheatmap)
+  if (!requireNamespace("ggrepel", quietly = TRUE)) {
+    stop("Package 'ggrepel' is required. Install with install.packages(\"ggrepel\").")
+  }
+  library(ggplot2)
 })
 
 args0 <- commandArgs(trailingOnly = FALSE)
@@ -34,10 +35,6 @@ script_dir <- if (length(file_arg)) {
   normalizePath(".", winslash = "/")
 }
 source(file.path(script_dir, "rankGenesSplitUtils.R"))
-
-DEFAULT_GENE_PANEL_RDS <- path.expand(
-  "~/Thesis/CCC/outputs/RData_objects/GenesLists/Complexes.Oncogenes.OncoKB.Cosmic.NCG.rds"
-)
 
 option_list <- list(
   make_option("--dataset_name", type = "character", default = NULL,
@@ -53,13 +50,11 @@ option_list <- list(
               help = "Pseudobulk matrix directory [default %default]",
               metavar = "character"),
   make_option("--gene_list", type = "character", default = NULL,
-              help = "Optional .rds or .txt gene list (default: scDiffCom panel)",
+              help = "Optional .rds or .txt gene list (default: 123-gene scDiffCom panel)",
               metavar = "character"),
   make_option("--output_dir", type = "character", default = NULL,
               help = "Output directory [default ~/Thesis/CCC/outputs/split_similarity/{dataset}]",
               metavar = "character"),
-  make_option("--no_cluster", action = "store_true", default = FALSE,
-              help = "Skip hierarchical clustering and heatmap reordering"),
   make_option("--jaccard_threshold", type = "double", default = 1.0,
               help = "Threshold for duplicate/near-duplicate groups [default %default]"),
   make_option("--max_genes_full_matrix", type = "integer", default = 2500L,
@@ -88,13 +83,6 @@ out_dir <- if (!is.null(opt$output_dir) && nzchar(opt$output_dir)) {
 }
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-load_panel_genes <- function() {
-  if (file.exists(DEFAULT_GENE_PANEL_RDS)) {
-    return(unique(as.character(readRDS(DEFAULT_GENE_PANEL_RDS))))
-  }
-  SCDIFFCOM_GENE_PANEL
-}
-
 load_splits_for_analysis <- function() {
   ds_dir <- file.path(rankgenes_dir, opt$dataset_name)
   all_splits_path <- file.path(ds_dir, paste0(opt$dataset_name, ALL_SPLITS_SUFFIX))
@@ -102,15 +90,7 @@ load_splits_for_analysis <- function() {
   panel_genes <- if (!is.null(opt$gene_list) && nzchar(opt$gene_list)) {
     load_gene_list(opt$gene_list)
   } else {
-    load_panel_genes()
-  }
-
-  if (mode == "panel" && length(panel_genes) > PANEL_MAX_GENES) {
-    message(
-      "Panel mode: using first ", PANEL_MAX_GENES, " of ",
-      length(panel_genes), " genes (list order preserved)."
-    )
-    panel_genes <- panel_genes[seq_len(PANEL_MAX_GENES)]
+    SCDIFFCOM_GENE_PANEL
   }
 
   if (file.exists(all_splits_path)) {
@@ -200,38 +180,52 @@ if (compute_full_matrix) {
     row.names = FALSE
   )
 
-  do_cluster <- !isTRUE(opt$no_cluster) && G >= 2L
-  hc <- NULL
-  if (do_cluster) {
+  if (G >= 2L) {
     d <- as.dist(dist_mat)
     d[is.na(d)] <- 1
     hc <- hclust(d, method = "average")
     saveRDS(hc, file.path(out_dir, "gene_clusters.rds"))
+
+    k_mds <- min(2L, G - 1L)
+    if (k_mds >= 1L) {
+      mds_coords <- cmdscale(d, k = k_mds)
+      if (k_mds == 1L) {
+        mds_coords <- cbind(mds_coords, 0)
+      }
+      mds_df <- data.frame(
+        gene = rownames(J),
+        MDS1 = mds_coords[, 1],
+        MDS2 = mds_coords[, 2],
+        stringsAsFactors = FALSE
+      )
+      saveRDS(mds_df, file.path(out_dir, "jaccard_mds_coords.rds"))
+
+      p_mds <- ggplot(mds_df, aes(x = MDS1, y = MDS2)) +
+        geom_point(size = 2, alpha = 0.85, colour = "#4575b4") +
+        ggrepel::geom_text_repel(
+          aes(label = gene),
+          size = 2.8,
+          max.overlaps = Inf,
+          box.padding = 0.3,
+          segment.size = 0.2,
+          segment.alpha = 0.4
+        ) +
+        theme_classic(base_size = 13) +
+        labs(
+          title = paste0(
+            opt$dataset_name, " – Gene split agreement (MDS, n=", G, ")"
+          ),
+          subtitle = paste(
+            "2D classical MDS on Jaccard distance (1 − similarity);",
+            "closer points = more similar splits"
+          )
+        )
+
+      mds_path <- file.path(out_dir, "jaccard_mds.png")
+      ggsave(mds_path, plot = p_mds, width = 12, height = 9, dpi = 300)
+      message("Wrote MDS plot: ", mds_path)
+    }
   }
-
-  D_plot <- dist_mat
-  diag(D_plot) <- NA_real_
-
-  heatmap_path <- file.path(out_dir, "jaccard_heatmap.png")
-  label_fs <- max(4, 200 / nrow(D_plot))
-
-  png(heatmap_path, width = 4000, height = 4000, res = 300)
-  pheatmap(
-    D_plot,
-    color           = colorRampPalette(c("#d73027", "white", "#4575b4"))(100),
-    breaks = seq(0, 1, length.out = 101),
-    na_col = "#E8E8E8",
-    cluster_rows = if (isTRUE(opt$no_cluster)) FALSE else (if (is.null(hc)) TRUE else hc),
-    cluster_cols = if (isTRUE(opt$no_cluster)) FALSE else (if (is.null(hc)) TRUE else hc),
-    fontsize_row = label_fs,
-    fontsize_col = label_fs,
-    angle_col = 45,
-    main = paste0(
-      opt$dataset_name, " – Gene-Gene Jaccard Split Distance (n=", G, ")"
-    )
-  )
-  dev.off()
-  message("Wrote heatmap (pheatmap, distance): ", heatmap_path)
 } else {
   message(
     "Skipping full Jaccard matrix (G=", G, " > max_genes_full_matrix=",
