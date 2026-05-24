@@ -237,61 +237,78 @@ Each point is embedded based on a **binary vector** over the global CCI vocabula
 
 ---
 
-## 7. Gene–Gene Consensus Jaccard Clustering
+## 7. Gene–Gene Consensus Jaccard & Average Overlap
 
 ### Logic & Objectives
 
-Where the UMAP explores individual gene × dataset profiles, this chunk asks a complementary question: **which genes share similar overall communication signatures when considered across all six datasets together?**
+This chunk asks: **which genes have similar tumour microenvironment communication programmes when pooled across cohorts?**
 
-To answer this, each gene's CCI repertoire is aggregated into a **union set** (all CCIs that appear in at least one dataset's top-500 list for that gene). This consensus representation collapses dataset-level noise and focuses on the broadest communication fingerprint of each gene. The top 50 genes by total union CCI count are then selected to focus on the most communication-active genes.
+It is complementary to the global Gene×Dataset UMAP (chunk 6): here each gene is collapsed to **one consensus CCI profile**, then genes are compared pairwise.
 
-A **Gene × Gene Jaccard similarity matrix** is computed on these union sets, and **Ward-D2 hierarchical clustering** is applied to identify modules of co-regulated communicating genes — genes in the same module tend to recruit the same CCIs across the tumour microenvironment.
+### Aggregation: dataset × gene → gene
 
-**Why Ward-D2?** Ward's method minimises within-cluster variance at each merge step, producing compact, well-separated modules that are easier to interpret biologically.
+Distances are **not** averaged across datasets. Each gene gets a single representation first:
 
-**Why the top 50 genes by union CCI count?** Genes with very few CCIs across all datasets contribute little signal and inflate the distance matrix with near-1 values. Restricting to the top 50 most active genes gives a heatmap that is both readable and biologically informative.
+| Step | Code | Meaning |
+|------|------|---------|
+| A | `build_gene_cci_sets(..., top_n = 500)` | Per dataset, per gene: top 500 CCIs by \|LOGFC\| |
+| B | `included_cci_sets` | Subset datasets by `GENE_GENE_CANCER_FILTER` (e.g. H&N → 4 cohorts) |
+| C | `select_hvg_ccis()` | CCIs with high variance across **Gene×Dataset** logFC rows |
+| D | `gene_cci_union[[g]]` | **Set union** of per-dataset top-500 CCIs for gene `g` |
+| E | `restrict_ccis_to_hvg()` | Keep only HVG CCIs in each union |
+| F | `top_genes` | Top `TOP_N_GENES` (default 400) by union HVG CCI count |
+| G | `gene_bin_mat` | Binary gene×CCI matrix for Jaccard |
+| H | `gene_jac_dist` | Jaccard distance via `tcrossprod` on binary matrix |
+| I | `gene_cci_consensus_ranked` | Consensus **ranked** lists for AO (dataset count + mean rank), HVG-filtered |
+
+Per-dataset raw lists: `gene_cci_top500_summary$<dataset>`.
 
 ### Inputs
 
-- `all_top_cci_sets`: master CCI set list (from chunk 4)
-- `GENES_OF_INT`: genes to highlight in the annotation bar
-- `TOP_N_GENES`: 50 (number of genes to retain)
-- `N_MODULES`: 5 (number of hierarchical clusters to cut)
+- `all_top_cci_sets` / `all_cci_sets_ranked`: per-dataset CCI sets (chunk `cci-sets`)
+- `GENE_GENE_CANCER_FILTER`: `"All"`, `"Breast"`, `"Lung"`, or `"H&N"`
+- `TOP_N_GENES`: number of genes in the Gene×Gene matrix (default 400)
+- `GENE_GENE_TOP_VAR_CCI_PCT` / `GENE_GENE_MIN_OBS_PER_CCI`: HVG CCI selection
 
 ### Outputs
 
-| Variable | Description |
+| Variable / file | Description |
 |---|---|
-| `gene_cci_union` | Named list: gene → union of all CCI IDs across all six datasets |
-| `top_genes` | Character vector of the top-50 genes by union CCI count |
-| `gene_bin_mat` | Binary matrix: rows = top-50 genes, columns = union CCI vocabulary |
-| `gene_jac_sim` | 50×50 Jaccard **similarity** matrix (Gene × Gene) |
-| `gene_jac_dist` | 50×50 Jaccard **distance** matrix (= 1 − similarity) |
-| `matrix_global_gene_similarity` | Alias of `gene_jac_sim`, exposed for inspection |
-| `hc_genes` | `hclust` object (Ward-D2) used to order rows/columns in the heatmap |
-| `gene_modules` | Named integer vector: gene → module index (1 to `N_MODULES`) |
-| `module_summary` | Data frame: Gene, Module label (M1–M5), n_CCIs, sorted by module and CCI count |
-| `gene_gene_jaccard_heatmap.png` | High-resolution (5000×5000 px, 300 dpi) heatmap saved to `OUTPUT_DIR` |
+| `gene_cci_union` | Named list: gene → union of top-500 CCIs across included datasets, HVG-filtered |
+| `gene_cci_top` | Subset for `top_genes` used in matrices |
+| `gene_bin_mat` | Binary matrix: genes × union CCI vocabulary |
+| `gene_jac_dist` | Gene×Gene Jaccard **distance** (= 1 − similarity) |
+| `gene_ao_dist` | Gene×Gene Average Overlap distance (consensus ranked lists) |
+| `matrix_global_gene_distance` | Alias of `gene_jac_dist` |
+| `matrix_global_gene_ao_distance` | Alias of `gene_ao_dist` |
+| `gene_dataset_cci_counts_{filter}.tsv` | Long audit: `gene`, `dataset`, `n_ccis_top500` |
+| `gene_gene_aggregation_summary_{filter}.tsv` | Per gene: `n_ccis_union_hvg`, `n_datasets_with_ccis`, `in_top_genes` |
+| `gene_gene_jaccard_heatmap_{filter}.png` | Jaccard distance heatmap (unchanged) |
+| `gene_gene_ao_heatmap_{filter}.png` | AO distance heatmap |
+| `gene_gene_jaccard_mds_{filter}.png` | 2D classical MDS on Jaccard distance |
+| `gene_gene_ao_mds_{filter}.png` | 2D classical MDS on AO distance |
+| `gene_gene_jaccard_mds_coords_{filter}.rds` | MDS coordinates + gene labels (Jaccard) |
+| `gene_gene_ao_mds_coords_{filter}.rds` | MDS coordinates (AO) |
+| `gene_gene_jaccard_mds_df` / `gene_gene_ao_mds_df` | Data frames from last filter iteration |
+| `list_gene_pairwise_intersections` | All pairs among `top_genes`: mutual CCIs |
+| `get_mutual_ccis_genes(g1, g2)` | Helper for shared CCIs between two top genes |
 
-### How to Interpret — Gene–Gene Jaccard Similarity Heatmap
+### How to Interpret — Gene–Gene Jaccard Heatmap
 
-**Matrix values:**
-Each cell (i, j) shows the **Jaccard similarity** between genes *i* and *j* based on their union CCI sets:
+**Matrix values:** cell (i, j) is Jaccard distance on union HVG CCI sets:
 
-$$\text{sim}_J(i, j) = \frac{|\text{CCI union}_i \cap \text{CCI union}_j|}{|\text{CCI union}_i \cup \text{CCI union}_j|}$$
+$$\text{dist}_J(i, j) = 1 - \frac{|\text{CCI union}_i \cap \text{CCI union}_j|}{|\text{CCI union}_i \cup \text{CCI union}_j|}$$
 
-- **Value = 1** (dark blue): genes *i* and *j* recruit an identical set of CCIs across all datasets — they may operate in the same signalling pathway or share ligand/receptor partners.
-- **Value = 0** (white): no CCI is shared between the two genes — entirely distinct communication programmes.
+- **Distance ≈ 0**: genes share nearly the same consensus CCI repertoire.
+- **Distance ≈ 1**: little or no overlap in union sets.
 
-**Row/column ordering:**
-Genes are ordered by Ward-D2 hierarchical clustering on the distance matrix (`1 − similarity`), so visually proximate rows/columns are most similar. Colour blocks along the diagonal correspond to the **M1–M5 modules** annotated in the sidebar.
+Rows/columns are clustered by `pheatmap` (default Euclidean on the distance matrix values).
 
-**Annotation bars:**
+### How to Interpret — Gene–Gene MDS plots
 
-| Bar | Meaning |
-|---|---|
-| **Module (M1–M5)** | Hierarchical cluster membership — genes within a module share overlapping CCI profiles and may represent co-regulated communication programmes |
-| **Highlight (Yes/No)** | Gold = gene is in `GENES_OF_INT` (e.g., CTLA4); grey = all other genes |
+**MDS** (`plot_gene_distance_mds`) embeds the same Gene×Gene distance matrix in 2D (`cmdscale`). Closer points = more similar genes under that metric.
 
-**Module summary table (`module_summary`):**
-Lists every top-50 gene with its module assignment and total union CCI count, sorted to make the most communication-active genes within each module immediately visible.
+- **Jaccard MDS**: faithful to union-set Jaccard; grey edges connect pairs with similarity ≥ 0.95 (distance ≤ 0.05).
+- **AO MDS**: based on consensus ranked lists; grey edges connect pairs in the bottom 5% of AO distances.
+
+All `top_genes` are labelled. Heatmaps are retained; MDS is an additional view of resemblance, not a replacement.
