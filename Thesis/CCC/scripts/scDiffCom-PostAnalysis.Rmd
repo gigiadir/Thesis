@@ -19,7 +19,7 @@ library(purrr)
 library(stringr)
 library(scDiffCom)
 library(ggplot2)
-library(ggrepel)
+#library(ggrepel)
 library(SuperRanker)
 
 
@@ -780,108 +780,6 @@ jaccard_dist <- function(set_a, set_b) {
   1 - inter / union
 }
 
-# Classical MDS on a gene×gene distance matrix (companion to heatmaps).
-plot_gene_distance_mds <- function(dist_mat, genes, title, subtitle, out_file,
-                                  edge_max_dist = NULL,
-                                  label_size = 2.2,
-                                  width = 14, height = 9) {
-  genes <- intersect(genes, rownames(dist_mat))
-  if (length(genes) < 2L) {
-    warning("Need at least 2 genes for MDS; skipping ", out_file)
-    return(invisible(NULL))
-  }
-
-  d_clust <- dist_mat[genes, genes, drop = FALSE]
-  d_clust[is.na(d_clust)] <- 1
-  diag(d_clust) <- 0
-
-  k_mds <- min(2L, length(genes) - 1L)
-  mds_fit <- stats::cmdscale(stats::as.dist(d_clust), k = k_mds, eig = TRUE)
-  coords <- mds_fit$points
-  if (k_mds == 1L) {
-    coords <- cbind(coords, 0)
-  }
-  colnames(coords) <- c("MDS1", "MDS2")
-
-  embed_df <- data.frame(
-    gene = genes,
-    MDS1 = coords[, 1],
-    MDS2 = coords[, 2],
-    stringsAsFactors = FALSE
-  )
-
-  stress <- NA_real_
-  if (!is.null(mds_fit$GOF) && length(mds_fit$GOF) >= 2L) {
-    stress <- round(mds_fit$GOF[[2]], 4)
-  }
-  if (!is.na(stress) && !grepl("stress", subtitle, fixed = TRUE)) {
-    subtitle <- paste(subtitle, "| GOF stress =", stress)
-  }
-
-  edge_plot <- NULL
-  if (!is.null(edge_max_dist)) {
-    ng <- length(genes)
-    rows <- list()
-    kk <- 1L
-    for (i in seq_len(ng - 1L)) {
-      for (j in (i + 1L):ng) {
-        dv <- dist_mat[genes[[i]], genes[[j]]]
-        if (!is.na(dv) && dv <= edge_max_dist) {
-          rows[[kk]] <- data.frame(
-            gene_a = genes[[i]],
-            gene_b = genes[[j]],
-            stringsAsFactors = FALSE
-          )
-          kk <- kk + 1L
-        }
-      }
-    }
-    if (length(rows) > 0L) {
-      edge_plot <- do.call(rbind, rows)
-      pos <- embed_df[, c("gene", "MDS1", "MDS2")]
-      colnames(pos) <- c("gene", "x", "y")
-      edge_plot <- merge(edge_plot, pos, by.x = "gene_a", by.y = "gene")
-      colnames(edge_plot)[colnames(edge_plot) == "x"] <- "x1"
-      colnames(edge_plot)[colnames(edge_plot) == "y"] <- "y1"
-      edge_plot <- merge(edge_plot, pos, by.x = "gene_b", by.y = "gene")
-      colnames(edge_plot)[colnames(edge_plot) == "x"] <- "x2"
-      colnames(edge_plot)[colnames(edge_plot) == "y"] <- "y2"
-    }
-  }
-
-  p <- ggplot(embed_df, aes(x = MDS1, y = MDS2)) +
-    theme_classic(base_size = 13)
-
-  if (!is.null(edge_plot) && nrow(edge_plot) > 0L) {
-    p <- p + geom_segment(
-      data = edge_plot,
-      aes(x = x1, y = y1, xend = x2, yend = y2),
-      inherit.aes = FALSE,
-      colour = "grey75",
-      linewidth = 0.25,
-      alpha = 0.6
-    )
-  }
-
-  p <- p +
-    geom_point(size = 2, alpha = 0.85, colour = "#4575b4") +
-    coord_equal() +
-    labs(title = title, subtitle = subtitle, x = "MDS1", y = "MDS2") +
-    ggrepel::geom_text_repel(
-      aes(label = gene),
-      size = label_size,
-      max.overlaps = Inf,
-      box.padding = 0.3,
-      segment.size = 0.2,
-      segment.alpha = 0.4
-    )
-
-  ggsave(out_file, plot = p, width = width, height = height, dpi = 300)
-  message("MDS plot saved to ", out_file)
-
-  invisible(list(coords_df = embed_df, stress = stress))
-}
-
 # build_gene_dataset_jaccard: N×N Jaccard distance matrix + pairwise CCI intersections
 # for one gene across N datasets.
 # Returns a list:
@@ -1606,21 +1504,6 @@ if (length(goi_labels) >= 2) {
 
 
 
-## Gene–gene aggregation (dataset → gene)
-
-Per **dataset** and **gene**, scDiffCom yields a top-500 CCI set (`build_gene_cci_sets`, ranked by |LOGFC|). For the gene–gene matrix:
-
-1. **Filter datasets** by `GENE_GENE_CANCER_FILTER` (e.g. H&N → Kurten, Puram, Choi, Bill).
-2. **Union** each gene's top-500 sets across those datasets (set union, not mean distance).
-3. **HVG filter**: keep CCIs in the top 5% of variance across Gene×Dataset logFC rows (`select_hvg_ccis`).
-4. **Top genes**: retain `TOP_N_GENES` with the largest union HVG sets.
-5. **Jaccard**: binary gene×CCI matrix → pairwise Jaccard distance (`tcrossprod`).
-6. **Average Overlap**: separate consensus **ranked** lists (dataset count + mean rank), then AO distance.
-
-This does **not** average distances across datasets; each gene is one consensus CCI representation, then genes are compared.
-
-Per-dataset CCI tables: `gene_cci_top500_summary$<dataset>`.
-
 # Gene-Gene Consensus Jaccard Matrix
 ```{r gene-gene-clustering}
 # ── CONFIG ────────────────────────────────────────────────────────────────────
@@ -1643,10 +1526,6 @@ if (!GENE_GENE_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
 }
 message("Gene–Gene matrix using datasets (", GENE_GENE_CANCER_FILTER, "): ",
         paste(names(included_cci_sets), collapse = ", "))
-message(
-  "Aggregation: per-dataset top-", TOP_N_CCI, " CCIs -> union across datasets -> HVG filter -> top ",
-  TOP_N_GENES, " genes -> Gene×Gene Jaccard + AO"
-)
 
 # HVG CCIs from logFC space (same logic as post-analysis-hvg-ccis).
 malignant_for_hvg <- setNames(
@@ -1689,68 +1568,6 @@ top_genes  <- sort(names(sort(cci_counts, decreasing = TRUE))[
   seq_len(min(TOP_N_GENES, length(cci_counts)))])
 gene_cci_top <- gene_cci_union[top_genes]
 message("Top ", length(top_genes), " genes selected")
-
-# ── 2b. Aggregation audit tables (dataset → gene) ─────────────────────────────
-gene_gene_filter_tag <- tolower(GENE_GENE_CANCER_FILTER)
-
-gene_dataset_cci_counts <- purrr::imap_dfr(included_cci_sets, function(ds_sets, dataset) {
-  purrr::imap_dfr(ds_sets, function(cci_vec, gene) {
-    tibble::tibble(
-      gene = gene,
-      dataset = dataset,
-      n_ccis_top500 = length(cci_vec)
-    )
-  })
-})
-
-gene_union_summary <- tibble::tibble(
-  gene = names(gene_cci_union),
-  n_ccis_union_hvg = lengths(gene_cci_union),
-  n_datasets_with_ccis = vapply(
-    names(gene_cci_union),
-    function(g) {
-      sum(vapply(
-        included_cci_sets,
-        function(ds) {
-          v <- ds[[g]]
-          !is.null(v) && length(v) > 0L
-        },
-        logical(1)
-      ))
-    },
-    integer(1)
-  ),
-  in_top_genes = names(gene_cci_union) %in% top_genes
-)
-
-write.table(
-  gene_dataset_cci_counts,
-  file = file.path(OUTPUT_DIR, sprintf("gene_dataset_cci_counts_%s.tsv", gene_gene_filter_tag)),
-  sep = "\t", row.names = FALSE, quote = FALSE
-)
-write.table(
-  gene_union_summary,
-  file = file.path(OUTPUT_DIR, sprintf("gene_gene_aggregation_summary_%s.tsv", gene_gene_filter_tag)),
-  sep = "\t", row.names = FALSE, quote = FALSE
-)
-message("Aggregation audit saved: gene_dataset_cci_counts_", gene_gene_filter_tag, ".tsv, ",
-        "gene_gene_aggregation_summary_", gene_gene_filter_tag, ".tsv")
-
-message("Top 10 genes by union HVG CCI count:")
-print(
-  gene_union_summary %>%
-    dplyr::arrange(dplyr::desc(n_ccis_union_hvg)) %>%
-    dplyr::slice_head(n = 10) %>%
-    dplyr::left_join(
-      gene_dataset_cci_counts %>%
-        dplyr::group_by(gene) %>%
-        dplyr::summarise(
-          per_dataset = paste(dataset, n_ccis_top500, sep = "=", collapse = "; "),
-          .groups = "drop"
-        ),
-      by = "gene"
-    )
-)
 
 # ── 3. Gene × CCI binary matrix ───────────────────────────────────────────────
 all_ccis_top <- unique(unlist(gene_cci_top))
@@ -1841,36 +1658,6 @@ do.call(pheatmap, c(heatmap_args, list(filename = gene_heatmap_file,
                                        height   = 3000 / 300)))
 message("Heatmap saved to ", gene_heatmap_file)
 
-# ── 5b. MDS on Gene×Gene Jaccard distance ─────────────────────────────────────
-gene_gene_jaccard_mds_file <- file.path(
-  OUTPUT_DIR,
-  sprintf("gene_gene_jaccard_mds_%s.png", gene_gene_filter_tag)
-)
-gene_gene_jaccard_mds_rds <- file.path(
-  OUTPUT_DIR,
-  sprintf("gene_gene_jaccard_mds_coords_%s.rds", gene_gene_filter_tag)
-)
-jac_mds_res <- plot_gene_distance_mds(
-  dist_mat       = gene_jac_dist,
-  genes          = top_genes,
-  title          = sprintf(
-    "Gene–Gene Jaccard MDS — HVG CCIs (%s, n=%d)",
-    if (GENE_GENE_CANCER_FILTER == "All") "all datasets"
-    else paste0(GENE_GENE_CANCER_FILTER, " datasets"),
-    length(top_genes)
-  ),
-  subtitle       = paste(
-    "Classical MDS on Jaccard distance (union CCI sets); closer = more similar;",
-    "edges: Jaccard similarity >= 0.95"
-  ),
-  out_file       = gene_gene_jaccard_mds_file,
-  edge_max_dist  = 0.05
-)
-if (!is.null(jac_mds_res)) {
-  gene_gene_jaccard_mds_df <- jac_mds_res$coords_df
-  saveRDS(gene_gene_jaccard_mds_df, gene_gene_jaccard_mds_rds)
-}
-
 # ── RBO: Gene × Gene distance matrix (same top genes, full ranked lists) ─────
 # For each top gene, build a consensus ranked CCI list across included datasets:
 # CCIs appearing in more datasets rank first; ties broken by mean rank position.
@@ -1957,41 +1744,6 @@ do.call(pheatmap, c(ao_heatmap_args, list(filename = gene_ao_heatmap_file,
                                            height   = 3000 / 300)))
 message("AO heatmap saved to ", gene_ao_heatmap_file)
 
-# ── AO MDS on Gene×Gene Average Overlap distance ─────────────────────────────
-ao_edge_max <- stats::quantile(
-  gene_ao_dist[upper.tri(gene_ao_dist)],
-  probs = 0.05,
-  na.rm = TRUE
-)
-gene_gene_ao_mds_file <- file.path(
-  OUTPUT_DIR,
-  sprintf("gene_gene_ao_mds_%s.png", gene_gene_filter_tag)
-)
-gene_gene_ao_mds_rds <- file.path(
-  OUTPUT_DIR,
-  sprintf("gene_gene_ao_mds_coords_%s.rds", gene_gene_filter_tag)
-)
-ao_mds_res <- plot_gene_distance_mds(
-  dist_mat      = gene_ao_dist,
-  genes         = top_genes,
-  title         = sprintf(
-    "Gene–Gene Average Overlap MDS — HVG CCIs (%s, n=%d)",
-    if (GENE_GENE_CANCER_FILTER == "All") "all datasets"
-    else paste0(GENE_GENE_CANCER_FILTER, " datasets"),
-    length(top_genes)
-  ),
-  subtitle      = sprintf(
-    "Classical MDS on AO distance (consensus ranked lists); closer = more similar; edges: dist <= %.3f (5%% quantile)",
-    ao_edge_max
-  ),
-  out_file      = gene_gene_ao_mds_file,
-  edge_max_dist = ao_edge_max
-)
-if (!is.null(ao_mds_res)) {
-  gene_gene_ao_mds_df <- ao_mds_res$coords_df
-  saveRDS(gene_gene_ao_mds_df, gene_gene_ao_mds_rds)
-}
-
 } # end for (GENE_GENE_CANCER_FILTER in c("All", "Breast", "Lung"))
 # NOTE: matrix_global_gene_* and gene_cci_* below reflect the last iteration ("Lung").
 
@@ -2001,10 +1753,6 @@ if (!is.null(ao_mds_res)) {
 # list_gene_pairwise_intersections      # tibble: GeneA, GeneB, mutual_ccis (list), n_mutual
 # gene_cci_top                          # named list: gene → union CCI character vector (Jaccard)
 # gene_cci_consensus_ranked             # named list: gene → consensus ranked CCI vector (AO)
-# gene_dataset_cci_counts               # long: gene, dataset, n_ccis_top500
-# gene_union_summary                    # per gene: n_ccis_union_hvg, n_datasets_with_ccis, in_top_genes
-# gene_gene_jaccard_mds_df              # MDS coordinates (Jaccard)
-# gene_gene_ao_mds_df                   # MDS coordinates (AO)
 # get_mutual_ccis_genes(gene1, gene2)   # helper: shared CCIs for any two top genes
 
 # Quick-access convenience (uncomment to open in RStudio viewer)
