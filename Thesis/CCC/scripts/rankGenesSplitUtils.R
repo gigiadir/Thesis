@@ -1,8 +1,10 @@
-# Shared helpers for RankGenes and split-similarity analysis.
-# Sourced by scDiffCom-Preprocess-RankGenes.R and analyzeGeneSplitJaccard.R.
+# Shared helpers for RankGenes, Residual, and split-similarity analysis.
+# Sourced by scDiffCom-Preprocess-RankGenes.R, scDiffCom-Preprocess-Residual.R,
+# and analyzeGeneSplitJaccard.R.
 
 PSEUDOBULK_MATRIX_SUFFIX <- "_pseudobulk_matrix.rds"
 ALL_SPLITS_SUFFIX <- "_all_patient_splits.rds"
+RESIDUAL_MATRIX_SUFFIX <- "_residual_matrix.rds"
 
 # scDiffCom panel (keep in sync with Main-scDiffComPipeline.R)
 SCDIFFCOM_GENE_PANEL <- c(
@@ -115,6 +117,128 @@ build_patient_splits_matrix <- function(mat, rank_mat = NULL) {
   splits
 }
 
+compute_patient_pcs <- function(mat, n_pc = 2L) {
+  n_pc <- as.integer(n_pc)
+  if (!n_pc %in% c(1L, 2L)) {
+    stop("n_pc must be 1 or 2. Got: ", n_pc)
+  }
+
+  patients <- colnames(mat)
+  t_mat <- t(mat)
+  complete <- stats::complete.cases(t_mat)
+  n_complete <- sum(complete)
+
+  if (n_complete < n_pc + 2L) {
+    stop(
+      "Need at least ", n_pc + 2L,
+      " patients with complete pseudobulk rows for PCA; got ", n_complete
+    )
+  }
+
+  t_complete <- t_mat[complete, , drop = FALSE]
+  gene_sd <- apply(t_complete, 2, stats::sd, na.rm = TRUE)
+  variable_genes <- is.finite(gene_sd) & gene_sd > 0
+  n_variable <- sum(variable_genes)
+  if (n_variable < n_pc + 2L) {
+    stop(
+      "Need at least ", n_pc + 2L,
+      " genes with nonzero variance across complete patients for PCA; got ",
+      n_variable
+    )
+  }
+  if (n_variable < ncol(t_complete)) {
+    message(
+      "PCA: excluded ", ncol(t_complete) - n_variable,
+      " zero-variance gene(s) across complete patients."
+    )
+  }
+
+  pc_fit <- stats::prcomp(
+    t_complete[, variable_genes, drop = FALSE],
+    center = TRUE,
+    scale. = TRUE
+  )
+  n_pc_use <- min(n_pc, ncol(pc_fit$x), nrow(pc_fit$x))
+
+  pcs <- matrix(NA_real_, nrow = length(patients), ncol = n_pc_use,
+                dimnames = list(patients, paste0("PC", seq_len(n_pc_use))))
+  pc_cols <- seq_len(n_pc_use)
+  pcs[complete, pc_cols] <- pc_fit$x[, pc_cols, drop = FALSE]
+
+  if (n_complete < length(patients)) {
+    message(
+      "PCA used ", n_complete, " of ", length(patients),
+      " patients (complete cases only)."
+    )
+  }
+
+  pcs
+}
+
+compute_residual_matrix <- function(mat, pcs) {
+  genes <- rownames(mat)
+  patients <- colnames(mat)
+  resid <- matrix(NA_real_, nrow = length(genes), ncol = length(patients),
+                  dimnames = list(genes, patients))
+
+  if (is.null(rownames(pcs))) rownames(pcs) <- patients
+  if (!identical(rownames(pcs), patients)) {
+    stop("pcs rownames must match colnames(mat).")
+  }
+
+  pc_ok <- stats::complete.cases(pcs)
+  if (sum(pc_ok) < 3L) {
+    return(resid)
+  }
+
+  P <- cbind(Intercept = 1, pcs[pc_ok, , drop = FALSE])
+  Q <- qr.Q(qr(P))
+  Y <- mat[, pc_ok, drop = FALSE]
+
+  gene_complete <- apply(Y, 1, function(r) all(is.finite(r)))
+  if (any(gene_complete)) {
+    Yc <- Y[gene_complete, , drop = FALSE]
+    Yt <- t(Yc)
+    Rc <- Yt - Q %*% crossprod(Q, Yt)
+    resid[which(gene_complete), pc_ok] <- t(Rc)
+  }
+
+  incomplete <- which(!gene_complete)
+  if (length(incomplete) > 0L) {
+    pcs_ok <- pcs[pc_ok, , drop = FALSE]
+    for (ii in incomplete) {
+      y <- mat[ii, pc_ok, drop = FALSE]
+      ok <- is.finite(y)
+      if (sum(ok) < 3L) next
+      fit <- stats::lm(y[ok] ~ pcs_ok[ok, , drop = FALSE])
+      r <- stats::residuals(fit)
+      resid[ii, pc_ok][ok] <- r
+    }
+  }
+
+  resid
+}
+
+build_residual_splits_matrix <- function(mat, n_pc = 2L, pcs = NULL) {
+  if (is.null(pcs)) {
+    pcs <- compute_patient_pcs(mat, n_pc = n_pc)
+  }
+
+  resid_mat <- compute_residual_matrix(mat, pcs)
+  stopifnot(identical(dim(resid_mat), dim(mat)))
+
+  genes <- rownames(mat)
+  patients <- colnames(mat)
+  splits <- matrix(NA_character_, nrow = length(genes), ncol = length(patients),
+                   dimnames = list(genes, patients))
+
+  for (i in seq_along(genes)) {
+    splits[i, ] <- assign_tertiles(resid_mat[i, ])
+  }
+
+  list(splits = splits, residuals = resid_mat, pcs = pcs)
+}
+
 splits_to_integer_matrix <- function(splits) {
   L <- matrix(0L, nrow = nrow(splits), ncol = ncol(splits),
               dimnames = dimnames(splits))
@@ -122,6 +246,29 @@ splits_to_integer_matrix <- function(splits) {
     L[splits == LABEL_LEVELS[[lev]]] <- as.integer(lev)
   }
   L
+}
+
+gene_indices_to_write <- function(all_genes, gene_list_path = NULL) {
+  if (is.null(gene_list_path) || !nzchar(gene_list_path)) {
+    return(seq_along(all_genes))
+  }
+  wanted <- load_gene_list(gene_list_path)
+  idx <- match(wanted, all_genes)
+  missing <- wanted[is.na(idx)]
+  if (length(missing) > 0L) {
+    warning(
+      length(missing), " gene(s) from --gene_list not in pseudobulk matrix: ",
+      paste(head(missing, 15L), collapse = ", "),
+      if (length(missing) > 15L) " ..." else "",
+      call. = FALSE,
+      immediate. = TRUE
+    )
+  }
+  idx <- idx[!is.na(idx)]
+  if (length(idx) == 0L) {
+    stop("No genes from --gene_list found in pseudobulk matrix.")
+  }
+  unique(idx)
 }
 
 load_gene_list <- function(path = NULL) {
@@ -148,6 +295,56 @@ load_splits_from_rankgenes_dir <- function(rankgenes_dir, dataset_name, genes = 
   ds_dir <- file.path(path.expand(rankgenes_dir), dataset_name)
   if (!dir.exists(ds_dir)) {
     stop("RankGenes directory not found: ", ds_dir)
+  }
+
+  if (is.null(genes)) {
+    files <- list.files(ds_dir, pattern = paste0("_", dataset_name, "_grouped\\.rds$"),
+                        full.names = TRUE)
+    if (length(files) == 0L) {
+      stop("No grouped .rds files in ", ds_dir)
+    }
+    genes <- sub(paste0("_", dataset_name, "_grouped\\.rds$"), "",
+                 basename(files))
+  }
+
+  patients <- NULL
+  split_rows <- list()
+
+  for (gene in genes) {
+    f <- file.path(ds_dir, paste0(gene, "_", dataset_name, "_grouped.rds"))
+    if (!file.exists(f)) next
+    df <- readRDS(f)
+    exp_col <- grep("_EXP$", colnames(df), value = TRUE)[1]
+    if (is.na(exp_col)) next
+    if (is.null(patients)) {
+      patients <- as.character(df$patient_id)
+    }
+    vec <- setNames(as.character(df[[exp_col]]), as.character(df$patient_id))
+    split_rows[[gene]] <- vec[patients]
+  }
+
+  if (length(split_rows) == 0L) {
+    stop("No splits loaded from ", ds_dir)
+  }
+
+  genes_found <- names(split_rows)
+  splits <- matrix(NA_character_, nrow = length(genes_found), ncol = length(patients),
+                   dimnames = list(genes_found, patients))
+  for (g in genes_found) {
+    splits[g, ] <- split_rows[[g]]
+  }
+  splits
+}
+
+load_splits_from_residual_dir <- function(residual_dir, dataset_name, genes = NULL) {
+  ds_dir <- file.path(path.expand(residual_dir), dataset_name)
+  if (!dir.exists(ds_dir)) {
+    stop("Residual splits directory not found: ", ds_dir)
+  }
+
+  all_splits_path <- file.path(ds_dir, paste0(dataset_name, ALL_SPLITS_SUFFIX))
+  if (is.null(genes) && file.exists(all_splits_path)) {
+    return(readRDS(all_splits_path))
   }
 
   if (is.null(genes)) {

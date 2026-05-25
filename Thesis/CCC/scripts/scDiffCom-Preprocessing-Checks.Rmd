@@ -551,30 +551,35 @@ Compare per-gene cross-patient dispersion in **continuous pseudobulk expression*
 |--------|---------------------------|
 | `patient_zscore` | Tertiles from row-wise z-scores of expression ([scDiffCom-Preprocess-PatientZScore.R](scDiffCom-Preprocess-PatientZScore.R)) — measures compression from tertiling expression |
 | `rankgenes` | Tertiles from within-patient ranks ([scDiffCom-Preprocess-RankGenes.R](scDiffCom-Preprocess-RankGenes.R)) — reflects patient-specific ranking, not expression variance alone |
+| `residual` | Tertiles from PC-regressed pseudobulk residuals ([scDiffCom-Preprocess-Residual.R](scDiffCom-Preprocess-Residual.R)) — expression adjusted for patient-level PCA structure |
 
 ```{r gene-dispersion-expr-vs-split, message=FALSE, warning=FALSE}
 library(dplyr)
 library(ggplot2)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SPLIT_SOURCE <- "both"   # "patient_zscore" | "rankgenes" | "both"
+SPLIT_SOURCE <- "both"   # "patient_zscore" | "rankgenes" | "residual" | "both" | "all"
 DATASETS <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
 PSEUDOBULK_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
 ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
 RANKGENES_DIR <- path.expand("~/CCC-PreProcess/results-RankGenes")
+RESIDUAL_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-Residual")
 QC_OUT_DIR <- path.expand("~/Thesis/CCC/outputs/plots/QC/gene_dispersion")
 
 split_sources <- switch(
   SPLIT_SOURCE,
   patient_zscore = "patient_zscore",
   rankgenes = "rankgenes",
+  residual = "residual",
   both = c("patient_zscore", "rankgenes"),
-  stop("SPLIT_SOURCE must be 'patient_zscore', 'rankgenes', or 'both'. Got: ", SPLIT_SOURCE)
+  all = c("patient_zscore", "rankgenes", "residual"),
+  stop("SPLIT_SOURCE must be 'patient_zscore', 'rankgenes', 'residual', 'both', or 'all'. Got: ", SPLIT_SOURCE)
 )
 
 split_source_labels <- c(
   patient_zscore = "Patient-ZScore tertiles",
-  rankgenes = "RankGenes tertiles (within-patient rank)"
+  rankgenes = "RankGenes tertiles (within-patient rank)",
+  residual = "Residual tertiles (PC-regressed pseudobulk)"
 )
 
 # ── Shared helpers (rankGenesSplitUtils.R) ────────────────────────────────────
@@ -708,11 +713,34 @@ load_splits_rankgenes <- function(dataset_name, rankgenes_dir, expr_mat) {
   build_patient_splits_matrix(expr_mat, rank_mat = rank_mat)
 }
 
+load_splits_residual <- function(dataset_name, residual_dir, expr_mat, n_pc = 2L) {
+  ds_dir <- file.path(path.expand(residual_dir), dataset_name)
+  all_splits_path <- file.path(ds_dir, paste0(dataset_name, ALL_SPLITS_SUFFIX))
+
+  if (file.exists(all_splits_path)) {
+    message("  Loading Residual splits: ", all_splits_path)
+    return(readRDS(all_splits_path))
+  }
+
+  splits <- tryCatch(
+    load_splits_from_residual_dir(residual_dir, dataset_name),
+    error = function(e) NULL
+  )
+  if (!is.null(splits)) {
+    message("  Loaded Residual splits from grouped .rds files in ", ds_dir)
+    return(splits)
+  }
+
+  message("  Residual splits not found; building from pseudobulk (PC-regressed tertiles).")
+  build_residual_splits_matrix(expr_mat, n_pc = n_pc)$splits
+}
+
 load_splits_for_source <- function(source, dataset_name, expr_mat) {
   switch(
     source,
     patient_zscore = load_splits_from_grouped_dir(ZSCORE_SPLITS_DIR, dataset_name),
     rankgenes = load_splits_rankgenes(dataset_name, RANKGENES_DIR, expr_mat),
+    residual = load_splits_residual(dataset_name, RESIDUAL_SPLITS_DIR, expr_mat),
     stop("Unknown split source: ", source)
   )
 }
@@ -855,6 +883,7 @@ DATASETS <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
 PSEUDOBULK_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
 ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
 RANKGENES_DIR <- path.expand("~/CCC-PreProcess/results-RankGenes")
+RESIDUAL_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-Residual")
 PROFILE_PCA_DIR <- path.expand("~/Thesis/CCC/outputs/plots/QC/gene_profile_pca")
 N_PC <- 2L
 MIN_PATIENTS <- 5L
@@ -866,13 +895,16 @@ split_sources <- switch(
   SPLIT_SOURCE,
   patient_zscore = "patient_zscore",
   rankgenes = "rankgenes",
+  residual = "residual",
   both = c("patient_zscore", "rankgenes"),
-  stop("SPLIT_SOURCE must be 'patient_zscore', 'rankgenes', or 'both'.")
+  all = c("patient_zscore", "rankgenes", "residual"),
+  stop("SPLIT_SOURCE must be 'patient_zscore', 'rankgenes', 'residual', 'both', or 'all'.")
 )
 
 split_source_labels <- c(
   patient_zscore = "Patient-ZScore tertiles",
-  rankgenes = "RankGenes tertiles (within-patient rank)"
+  rankgenes = "RankGenes tertiles (within-patient rank)",
+  residual = "Residual tertiles (PC-regressed pseudobulk)"
 )
 
 script_dir <- tryCatch(
@@ -1094,11 +1126,24 @@ load_splits_rankgenes <- function(dataset_name, rankgenes_dir, expr_mat) {
   build_patient_splits_matrix(expr_mat, rank_mat = rank_mat)
 }
 
+load_splits_residual <- function(dataset_name, residual_dir, expr_mat, n_pc = 2L) {
+  ds_dir <- file.path(path.expand(residual_dir), dataset_name)
+  all_splits_path <- file.path(ds_dir, paste0(dataset_name, ALL_SPLITS_SUFFIX))
+  if (file.exists(all_splits_path)) return(readRDS(all_splits_path))
+  splits <- tryCatch(
+    load_splits_from_residual_dir(residual_dir, dataset_name),
+    error = function(e) NULL
+  )
+  if (!is.null(splits)) return(splits)
+  build_residual_splits_matrix(expr_mat, n_pc = n_pc)$splits
+}
+
 load_splits_for_source <- function(source, dataset_name, expr_mat) {
   switch(
     source,
     patient_zscore = load_splits_from_grouped_dir(ZSCORE_SPLITS_DIR, dataset_name),
     rankgenes = load_splits_rankgenes(dataset_name, RANKGENES_DIR, expr_mat),
+    residual = load_splits_residual(dataset_name, RESIDUAL_SPLITS_DIR, expr_mat),
     stop("Unknown split source: ", source)
   )
 }
