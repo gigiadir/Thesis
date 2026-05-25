@@ -1,0 +1,93 @@
+# HVG CCIs
+
+```{r post-analysis-hvg-ccis}
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+TOP_VAR_CCI_PCT  <- 0.1   # keep top X% CCIs by cross Gene×Dataset variance
+MIN_OBS_PER_CCI  <- 10     # minimum non-NA rows per CCI to enter HVG ranking
+
+CCI_POST_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
+for (CCI_POST_CANCER_FILTER in CCI_POST_CANCER_FILTER_OPTIONS) {
+message("\n===== CCI_POST_CANCER_FILTER: ", CCI_POST_CANCER_FILTER, " =====")
+
+.cci_all_datasets <- list(
+  Kurten_HNSC = Kurten_HNSC.malignant,
+  Puram_HNSC  = Puram_HNSC.malignant,
+  Choi_HNSC   = Choi_HNSC.malignant,
+  Bill_HNSC   = Bill_HNSC.malignant
+)
+.cci_all_cancer <- c(
+  Kurten_HNSC = "H&N",
+  Puram_HNSC  = "H&N",
+  Choi_HNSC   = "H&N",
+  Bill_HNSC   = "H&N"
+)
+
+if (!CCI_POST_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
+  stop('CCI_POST_CANCER_FILTER must be one of: "All", "Breast", "Lung", "H&N"')
+{
+  keep_ds <- if (CCI_POST_CANCER_FILTER == "All") {
+    names(.cci_all_datasets)
+  } else {
+    names(.cci_all_datasets)[.cci_all_cancer[names(.cci_all_datasets)] == CCI_POST_CANCER_FILTER]
+  }
+  CCI_POST_DATASETS <- .cci_all_datasets[keep_ds]
+  CCI_POST_CANCER   <- .cci_all_cancer[keep_ds]
+}
+message("CCI post-analysis datasets (", CCI_POST_CANCER_FILTER, "): ",
+        paste(names(CCI_POST_DATASETS), collapse = ", "))
+
+# ── 1. Per-dataset CCI × Gene logFC matrices ──────────────────────────────────
+cci_mats <- lapply(CCI_POST_DATASETS, build_cci_logfc_mat)
+message("Union CCI space (before HVG): ", length(unique(unlist(lapply(cci_mats, rownames)))), " CCIs")
+
+# ── 2. Cross-cohort Gene×Dataset × CCI matrix (NA = absent) ───────────────────
+cci_feat <- build_gene_dataset_cci_feat_mat(cci_mats, CCI_POST_CANCER)
+feat_mat_cci      <- cci_feat$feat_mat
+all_ccis_union    <- cci_feat$all_ccis
+labels_gd_cci     <- cci_feat$labels_gd
+genes_gd_cci      <- cci_feat$genes_gd
+datasets_gd_cci   <- cci_feat$datasets_gd
+cancer_gd_cci     <- cci_feat$cancer_gd
+message("Gene×Dataset × CCI matrix: ", nrow(feat_mat_cci), " rows × ",
+        ncol(feat_mat_cci), " CCI columns")
+
+# ── 3. HVG selection (variance on non-NA values only) ───────────────────────
+n_obs_per_cci <- colSums(!is.na(feat_mat_cci))
+cci_var <- apply(feat_mat_cci, 2, function(x) var(x, na.rm = TRUE))
+cci_var[n_obs_per_cci < MIN_OBS_PER_CCI] <- NA_real_
+
+eligible <- !is.na(cci_var)
+if (!any(eligible)) {
+  stop("No CCIs passed MIN_OBS_PER_CCI filter for HVG selection.")
+}
+
+var_cutoff <- quantile(cci_var[eligible], probs = 1 - TOP_VAR_CCI_PCT, na.rm = TRUE)
+top_var_ccis <- names(cci_var)[eligible & cci_var >= var_cutoff]
+feat_mat_hvg <- feat_mat_cci[, top_var_ccis, drop = FALSE]
+
+message(sprintf(
+  "HVG CCIs: %d / %d eligible (top %.0f%% by variance, cutoff = %.4f)",
+  length(top_var_ccis), sum(eligible), TOP_VAR_CCI_PCT * 100, var_cutoff
+))
+
+cci_var_df <- data.frame(
+  CCI = names(cci_var),
+  variance = cci_var,
+  n_obs = n_obs_per_cci,
+  is_hvg = names(cci_var) %in% top_var_ccis,
+  stringsAsFactors = FALSE
+) %>%
+  arrange(desc(variance))
+
+cci_post_out_tag <- tolower(CCI_POST_CANCER_FILTER)
+write.csv(
+  cci_var_df,
+  file.path(OUTPUT_DIR, sprintf("cci_hvg_variance_ranking_%s.csv", cci_post_out_tag)),
+  row.names = FALSE
+)
+message("CCI variance table saved.")
+
+} # end for (CCI_POST_CANCER_FILTER)
+# NOTE: feat_mat_cci, feat_mat_hvg, top_var_ccis reflect the last filter iteration.
+# Run post-analysis-limma-batch next (uses objects from the last iteration above).
+```

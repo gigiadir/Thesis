@@ -1,0 +1,257 @@
+# Gene-gene consensus Jaccard
+
+```{r gene-gene-clustering}
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+TOP_N_GENES <- 400  # genes ranked by total union CCI count
+GENE_GENE_TOP_VAR_CCI_PCT <- 0.05   # top X% CCIs by Gene×Dataset logFC variance (HVG)
+GENE_GENE_MIN_OBS_PER_CCI <- 10      # min non-NA Gene×Dataset rows per CCI for HVG ranking
+GENE_GENE_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
+for (GENE_GENE_CANCER_FILTER in GENE_GENE_CANCER_FILTER_OPTIONS) {
+message("\n===== GENE_GENE_CANCER_FILTER: ", GENE_GENE_CANCER_FILTER, " =====")
+
+# ── 1. Union CCI set per gene (restricted to included datasets) ───────────────
+if (!GENE_GENE_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
+  stop("GENE_GENE_CANCER_FILTER must be one of: \"All\", \"Breast\", \"Lung\", \"H&N\"")
+{
+  included_cci_sets <- if (GENE_GENE_CANCER_FILTER == "All") {
+    all_top_cci_sets
+  } else {
+    all_top_cci_sets[ds_cancer_map[names(all_top_cci_sets)] == GENE_GENE_CANCER_FILTER]
+  }
+}
+message("Gene–Gene matrix using datasets (", GENE_GENE_CANCER_FILTER, "): ",
+        paste(names(included_cci_sets), collapse = ", "))
+
+# HVG CCIs from logFC space (same logic as post-analysis-hvg-ccis).
+malignant_for_hvg <- setNames(
+  lapply(names(included_cci_sets), function(ds) {
+    obj_name <- paste0(ds, ".malignant")
+    if (!exists(obj_name, inherits = TRUE)) {
+      stop("Missing ", obj_name, " — required for gene–gene HVG CCI selection.")
+    }
+    get(obj_name, inherits = TRUE)
+  }),
+  names(included_cci_sets)
+)
+hvg_sel <- select_hvg_ccis(
+  malignant_for_hvg,
+  ds_cancer_map[names(malignant_for_hvg)],
+  top_pct = GENE_GENE_TOP_VAR_CCI_PCT,
+  min_obs = GENE_GENE_MIN_OBS_PER_CCI
+)
+gene_gene_hvg_ccis <- hvg_sel$hvg
+message(sprintf(
+  "Gene–gene HVG CCIs: %d / %d eligible (top %.0f%% by variance, cutoff = %.4f)",
+  length(gene_gene_hvg_ccis), hvg_sel$n_eligible,
+  GENE_GENE_TOP_VAR_CCI_PCT * 100, hvg_sel$var_cutoff
+))
+
+all_gene_names <- sort(unique(unlist(lapply(included_cci_sets, names))))
+gene_cci_union <- setNames(
+  lapply(all_gene_names, function(g) {
+    unique(unlist(lapply(included_cci_sets, function(ds) ds[[g]])))
+  }),
+  all_gene_names
+)
+gene_cci_union <- lapply(gene_cci_union, restrict_ccis_to_hvg, hvg_ccis = gene_gene_hvg_ccis)
+gene_cci_union <- Filter(function(x) length(x) > 0, gene_cci_union)
+message("Genes with at least one HVG CCI (union): ", length(gene_cci_union))
+
+# ── 2. Top N genes by union CCI count ─────────────────────────────────────────
+cci_counts <- sapply(gene_cci_union, length)
+top_genes  <- sort(names(sort(cci_counts, decreasing = TRUE))[
+  seq_len(min(TOP_N_GENES, length(cci_counts)))])
+gene_cci_top <- gene_cci_union[top_genes]
+message("Top ", length(top_genes), " genes selected")
+
+# ── 3. Gene × CCI binary matrix ───────────────────────────────────────────────
+all_ccis_top <- unique(unlist(gene_cci_top))
+gene_bin_mat <- do.call(rbind, lapply(gene_cci_top, function(v) as.integer(all_ccis_top %in% v)))
+rownames(gene_bin_mat) <- top_genes
+message("Gene binary matrix: ", nrow(gene_bin_mat), " × ", ncol(gene_bin_mat))
+
+# ── 3b. Gene-level pairwise CCI intersection object ───────────────────────────
+# Helper: return CCIs shared between any two top genes (union-across-datasets sets)
+get_mutual_ccis_genes <- function(gene1, gene2) {
+  s1 <- gene_cci_top[[gene1]]
+  s2 <- gene_cci_top[[gene2]]
+  if (is.null(s1) || is.null(s2)) stop("Gene not found. Available: ", paste(top_genes, collapse = ", "))
+  intersect(s1, s2)
+}
+
+# Pairwise intersection table for all top-gene pairs (upper-triangle, long format)
+{
+  ng  <- length(top_genes)
+  idx_g <- which(upper.tri(matrix(0, ng, ng)), arr.ind = TRUE)
+  list_gene_pairwise_intersections <- tibble::tibble(
+    GeneA        = top_genes[idx_g[, 1]],
+    GeneB        = top_genes[idx_g[, 2]],
+    mutual_ccis  = mapply(
+      function(i, j) intersect(gene_cci_top[[top_genes[i]]], gene_cci_top[[top_genes[j]]]),
+      idx_g[, 1], idx_g[, 2],
+      SIMPLIFY = FALSE
+    ),
+    n_mutual     = sapply(
+      seq_len(nrow(idx_g)),
+      function(k) length(intersect(gene_cci_top[[top_genes[idx_g[k, 1]]]],
+                                   gene_cci_top[[top_genes[idx_g[k, 2]]]]))
+    )
+  )
+}
+message("Gene pairwise intersection table: ", nrow(list_gene_pairwise_intersections), " pairs")
+
+# ── 4. Consensus Jaccard distance (Gene × Gene) ───────────────────────────────
+cross_g <- tcrossprod(gene_bin_mat)
+rsums_g <- rowSums(gene_bin_mat)
+union_g <- outer(rsums_g, rsums_g, "+") - cross_g
+union_g[union_g == 0] <- NA_real_
+
+gene_jac_dist <- 1 - cross_g / union_g
+diag(gene_jac_dist) <- NA_real_
+gene_jac_dist_clust <- gene_jac_dist
+gene_jac_dist_clust[is.na(gene_jac_dist_clust)] <- 1
+diag(gene_jac_dist_clust) <- 0
+gene_jac_dist[is.na(gene_jac_dist) & row(gene_jac_dist) != col(gene_jac_dist)] <- 1
+
+matrix_global_gene_distance <- gene_jac_dist
+
+# ── 5. Heatmap ────────────────────────────────────────────────────────────────
+{
+  disp_nums_jac <- matrix(sprintf("%.2f", gene_jac_dist),
+                          nrow = nrow(gene_jac_dist), dimnames = dimnames(gene_jac_dist))
+  diag(disp_nums_jac) <- ""
+}
+heatmap_args <- list(
+  gene_jac_dist,
+  color           = colorRampPalette(c("#4575b4", "#ffffbf", "#d73027"))(100),
+  breaks          = seq(min(gene_jac_dist, na.rm = TRUE),
+                        max(gene_jac_dist, na.rm = TRUE),
+                        length.out = 101),
+  na_col          = "grey80",
+  cluster_rows    = TRUE,
+  cluster_cols    = TRUE,
+  # clustering_distance_rows = as.dist(gene_jac_dist_clust),
+  # clustering_distance_cols = as.dist(gene_jac_dist_clust),
+  #display_numbers = disp_nums_jac,
+  #number_color    = "black",
+  #fontsize_number = 8,
+  fontsize_row    = max(4, 120 / length(top_genes)),
+  fontsize_col    = max(4, 120 / length(top_genes)),
+  angle_col       = "45",
+  main            = sprintf(
+    "Gene–Gene Jaccard Distance — HVG CCIs only (%s)",
+    if (GENE_GENE_CANCER_FILTER == "All") "consensus across all datasets"
+    else paste0(GENE_GENE_CANCER_FILTER, " datasets only"))
+)
+
+do.call(pheatmap, heatmap_args)
+
+gene_heatmap_file <- file.path(OUTPUT_DIR,
+  sprintf("gene_gene_jaccard_heatmap_%s.png", tolower(GENE_GENE_CANCER_FILTER)))
+do.call(pheatmap, c(heatmap_args, list(filename = gene_heatmap_file,
+                                       width    = 3000 / 300,
+                                       height   = 3000 / 300)))
+message("Heatmap saved to ", gene_heatmap_file)
+
+# ── RBO: Gene × Gene distance matrix (same top genes, full ranked lists) ─────
+# For each top gene, build a consensus ranked CCI list across included datasets:
+# CCIs appearing in more datasets rank first; ties broken by mean rank position.
+{
+  included_cci_sets_ranked <- if (GENE_GENE_CANCER_FILTER == "All") {
+    all_cci_sets_ranked
+  } else {
+    all_cci_sets_ranked[ds_cancer_map[names(all_cci_sets_ranked)] == GENE_GENE_CANCER_FILTER]
+  }
+}
+
+gene_cci_consensus_ranked <- setNames(
+  lapply(top_genes, function(g) {
+    rank_data <- purrr::imap_dfr(included_cci_sets_ranked, function(ds_sets, ds_name) {
+      cci_vec <- ds_sets[[g]]
+      if (is.null(cci_vec) || length(cci_vec) == 0) return(NULL)
+      data.frame(CCI = cci_vec, rank_pos = seq_along(cci_vec), stringsAsFactors = FALSE)
+    })
+    if (nrow(rank_data) == 0) return(character(0))
+    rank_data %>%
+      group_by(CCI) %>%
+      summarise(n_datasets = n(), mean_rank = mean(rank_pos), .groups = "drop") %>%
+      arrange(desc(n_datasets), mean_rank) %>%
+      pull(CCI) %>%
+      restrict_ccis_to_hvg(gene_gene_hvg_ccis)
+  }),
+  top_genes
+)
+
+
+# ── AO: Gene × Gene distance matrix (same top genes, full ranked lists) ──────
+message("Computing gene–gene Average Overlap distances for ", length(top_genes), " genes...")
+ng <- length(top_genes)
+gene_ao_dist <- matrix(0, nrow = ng, ncol = ng,
+                       dimnames = list(top_genes, top_genes))
+for (i in seq_len(ng - 1)) {
+  for (j in (i + 1):ng) {
+    d <- dist_fun_superranker_overlap(gene_cci_consensus_ranked[[top_genes[i]]],
+                                     gene_cci_consensus_ranked[[top_genes[j]]])
+    gene_ao_dist[i, j] <- d
+    gene_ao_dist[j, i] <- d
+  }
+}
+gene_ao_dist_clust <- gene_ao_dist
+gene_ao_dist_clust[is.na(gene_ao_dist_clust)] <- 1
+diag(gene_ao_dist) <- NA_real_
+matrix_global_gene_ao_distance <- gene_ao_dist
+message("Gene–gene AO matrix complete.")
+
+{
+  disp_nums_ao <- matrix(sprintf("%.2f", gene_ao_dist),
+                         nrow = nrow(gene_ao_dist), dimnames = dimnames(gene_ao_dist))
+  diag(disp_nums_ao) <- ""
+}
+ao_heatmap_args <- list(
+  gene_ao_dist,
+  color           = colorRampPalette(c("#4575b4", "#ffffbf", "#d73027"))(100),
+  breaks          = seq(min(gene_ao_dist, na.rm = TRUE),
+                        max(gene_ao_dist, na.rm = TRUE),
+                        length.out = 101),
+  na_col          = "grey80",
+  cluster_rows    = TRUE,
+  cluster_cols    = TRUE,
+  # clustering_distance_rows = as.dist(gene_ao_dist_clust),
+  # clustering_distance_cols = as.dist(gene_ao_dist_clust),
+ # display_numbers = disp_nums_ao,
+  #number_color    = "black",
+  #fontsize_number = 8,
+  fontsize_row    = max(4, 120 / length(top_genes)),
+  fontsize_col    = max(4, 120 / length(top_genes)),
+  angle_col       = "45",
+  main            = sprintf(
+    "Gene–Gene Average Overlap Distance — HVG CCIs only (%s)",
+    if (GENE_GENE_CANCER_FILTER == "All") "consensus across all datasets"
+    else paste0(GENE_GENE_CANCER_FILTER, " datasets only"))
+)
+
+do.call(pheatmap, ao_heatmap_args)
+
+gene_ao_heatmap_file <- file.path(OUTPUT_DIR,
+  sprintf("gene_gene_ao_heatmap_%s.png", tolower(GENE_GENE_CANCER_FILTER)))
+do.call(pheatmap, c(ao_heatmap_args, list(filename = gene_ao_heatmap_file,
+                                           width    = 3000 / 300,
+                                           height   = 3000 / 300)))
+message("AO heatmap saved to ", gene_ao_heatmap_file)
+
+} # end for (GENE_GENE_CANCER_FILTER in c("All", "Breast", "Lung"))
+# NOTE: matrix_global_gene_* and gene_cci_* below reflect the last iteration ("Lung").
+
+# ── Expose for inspection ────────────────────────────────────────────────────
+# matrix_global_gene_distance          # Gene × Gene Jaccard distance matrix (top-500 lists)
+# matrix_global_gene_ao_distance       # Gene × Gene AO distance matrix (full ranked lists)
+# list_gene_pairwise_intersections      # tibble: GeneA, GeneB, mutual_ccis (list), n_mutual
+# gene_cci_top                          # named list: gene → union CCI character vector (Jaccard)
+# gene_cci_consensus_ranked             # named list: gene → consensus ranked CCI vector (AO)
+# get_mutual_ccis_genes(gene1, gene2)   # helper: shared CCIs for any two top genes
+
+# Quick-access convenience (uncomment to open in RStudio viewer)
+# View(as.data.frame(matrix_global_gene_distance))
+# View(list_gene_pairwise_intersections)
+# get_mutual_ccis_genes("CTLA4", "CD274")
+```

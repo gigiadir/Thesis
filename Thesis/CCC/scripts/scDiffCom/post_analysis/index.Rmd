@@ -1,0 +1,72 @@
+---
+title: "scDiffCom Post-Analysis (H&N)"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+This notebook runs cross-cohort scDiffCom post-analysis for Head & Neck datasets.
+See [README.md](README.md) for section descriptions and how to add cohorts.
+
+```{r setup-post-analysis, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = TRUE,
+  warning = TRUE,
+  fig.width = 10,
+  fig.height = 7
+)
+
+# Resolve paths relative to this file (post_analysis/)
+POST_ANALYSIS_DIR <- normalizePath(".", winslash = "/")
+PROJECT_SCRIPTS   <- normalizePath(file.path(POST_ANALYSIS_DIR, "..", ".."), winslash = "/")
+
+source(file.path(PROJECT_SCRIPTS, "utils/Utils.R"))
+source(file.path(POST_ANALYSIS_DIR, "R/00_setup.R"))
+source(file.path(POST_ANALYSIS_DIR, "R/01_load_filter.R"))
+source(file.path(POST_ANALYSIS_DIR, "config/hnsc_datasets.R"))
+source(file.path(POST_ANALYSIS_DIR, "R/02_cci_helpers.R"))
+source(file.path(POST_ANALYSIS_DIR, "R/03_lri_helpers.R"))
+
+if (!requireNamespace("ggrepel", quietly = TRUE)) {
+  message("ggrepel not installed — some UMAP labels will be skipped.")
+} else {
+  library(ggrepel)
+}
+if (!requireNamespace("batchelor", quietly = TRUE)) {
+  message("batchelor not installed — MNN UMAP sections may fail.")
+} else {
+  library(batchelor)
+}
+```
+
+```{r child = "sections/01_load_and_filter.Rmd"}
+```
+
+```{r child = "sections/02_qc_celltypes.Rmd"}
+```
+
+```{r child = "sections/03_build_cci_sets.Rmd"}
+```
+
+```{r child = "sections/04_goi_cross_cohort.Rmd"}
+```
+
+```{r child = "sections/05_global_jaccard_umap.Rmd"}
+```
+
+```{r child = "sections/06_gene_gene_jaccard.Rmd"}
+```
+
+```{r child = "sections/07_lri_per_dataset.Rmd"}
+```
+
+```{r child = "sections/08_lri_cross_cohort_umap.Rmd"}
+```
+
+```{r child = "sections/09_hvg_ccis.Rmd"}
+```
+
+```{r child = "sections/10_limma_batch.Rmd"}
+```

@@ -97,3 +97,7 @@ Thesis/Figure 1 - Bulk/outputs
 .DS_Store
 *.swp
 *~
+
+# Post-analysis R helpers (override global R/ ignore)
+!Thesis/CCC/scripts/scDiffCom/post_analysis/R/
+!Thesis/CCC/scripts/scDiffCom/post_analysis/R/**

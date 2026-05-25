@@ -1,0 +1,20 @@
+# Archive — Breast & Lung load / filter snippets
+
+Not maintained. Copy into `sections/01_load_and_filter.Rmd` and extend `config/` if re-enabling multi-cancer analysis.
+
+```r
+# ── Breast ────────────────────────────────────────────────────────────────────
+# Bassez2021_Breast_step4.scDiffComs <- load.dataset.scDiffComs("Bassez2021_Breast_step4")
+# Qian2020_Breast_step4.scDiffComs   <- load.dataset.scDiffComs("Qian2020_Breast_step4")
+# Wu2021_Breast_step4.scDiffComs     <- load.dataset.scDiffComs("Wu2021_Breast_step4")
+# ... malignant lapply blocks — see scDiffCom-PostAnalysis.Rmd.monolith lines 99–119
+
+# ── Lung ──────────────────────────────────────────────────────────────────────
+# Chan2021_Lung_step4.scDiffComs     <- load.dataset.scDiffComs("Chan2021_Lung_step4")
+# Laughney2020_Lung_step4.scDiffComs <- load.dataset.scDiffComs("Laughney2020_Lung_step4")
+# Xing2021_Lung_step4.scDiffComs     <- load.dataset.scDiffComs("Xing2021_Lung_step4")
+# ... see monolith lines 122–138
+
+# Breast-only gene filter (monolith filter chunk lines 214–237):
+# Common.Breast.Malignant.Genes, Top.N.Genes, etc.
+```

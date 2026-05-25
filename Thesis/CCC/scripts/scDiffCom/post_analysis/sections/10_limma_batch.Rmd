@@ -1,0 +1,203 @@
+# limma batch correction
+
+```{r post-analysis-limma-batch}
+library(limma)
+
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+K_CCI_UMAP  <- 15
+MINDIST_CCI <- 0.1
+
+# Re-run full CCI post pipeline per cancer filter (HVG + limma + UMAPs).
+CCI_POST_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
+TOP_VAR_CCI_PCT  <- 0.05
+MIN_OBS_PER_CCI  <- 10
+
+impute_col_mean <- function(mat) {
+  mat_imp <- mat
+  for (j in seq_len(ncol(mat_imp))) {
+    na_idx <- is.na(mat_imp[, j])
+    if (any(na_idx)) {
+      col_mean <- mean(mat_imp[, j], na.rm = TRUE)
+      if (!is.finite(col_mean)) col_mean <- 0
+      mat_imp[na_idx, j] <- col_mean
+    }
+  }
+  mat_imp
+}
+
+plot_gene_dataset_cci_umap <- function(feat_mat_input, labels, genes, datasets, cancer,
+                                      colors, title, subtitle, out_file) {
+  mat <- feat_mat_input
+  mat[is.na(mat)] <- 0
+  if (nrow(mat) < 3L || ncol(mat) < 2L) {
+    message("Skipping UMAP (", out_file, "): insufficient dimensions.")
+    return(invisible(NULL))
+  }
+  set.seed(SEED)
+  k_eff <- min(K_CCI_UMAP, nrow(mat) - 1L)
+  umap_coords <- uwot::umap(mat,
+                            n_neighbors = k_eff,
+                            min_dist    = MINDIST_CCI,
+                            metric      = "cosine")
+  umap_df <- data.frame(
+    UMAP1   = umap_coords[, 1],
+    UMAP2   = umap_coords[, 2],
+    Label   = labels,
+    Gene    = genes,
+    Dataset = datasets,
+    Cancer  = cancer,
+    stringsAsFactors = FALSE
+  )
+  p <- ggplot(umap_df, aes(x = UMAP1, y = UMAP2, colour = Dataset, shape = Cancer)) +
+    geom_point(size = 1.8, alpha = 0.5) +
+    ggrepel::geom_text_repel(aes(label = Gene),
+      size = 2.5, max.overlaps = Inf,
+      box.padding = 0.3, segment.size = 0.2, segment.alpha = 0.4,
+      show.legend = FALSE) +
+    scale_colour_manual(values = colors) +
+    scale_shape_manual(values = cancer_shapes) +
+    theme_classic(base_size = 13) +
+    labs(title = title, subtitle = subtitle,
+         colour = "Dataset", shape = "Cancer Type", x = "UMAP 1", y = "UMAP 2")
+  print(p)
+  ggsave(out_file, plot = p, width = 14, height = 10, dpi = 300)
+  message("UMAP saved to ", out_file)
+  invisible(umap_df)
+}
+
+.cci_post_colors <- c(
+  Kurten_HNSC = "#F781BF",
+  Puram_HNSC  = "#999999",
+  Choi_HNSC   = "#66C2A5",
+  Bill_HNSC   = "#FC8D62"
+)
+.cci_all_datasets <- list(
+  Kurten_HNSC = Kurten_HNSC.malignant,
+  Puram_HNSC  = Puram_HNSC.malignant,
+  Choi_HNSC   = Choi_HNSC.malignant,
+  Bill_HNSC   = Bill_HNSC.malignant
+)
+.cci_all_cancer <- c(
+  Kurten_HNSC = "H&N",
+  Puram_HNSC  = "H&N",
+  Choi_HNSC   = "H&N",
+  Bill_HNSC   = "H&N"
+)
+
+for (CCI_POST_CANCER_FILTER in CCI_POST_CANCER_FILTER_OPTIONS) {
+message("\n===== limma batch correction: ", CCI_POST_CANCER_FILTER, " =====")
+
+if (!CCI_POST_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
+  stop('CCI_POST_CANCER_FILTER must be one of: "All", "Breast", "Lung", "H&N"')
+{
+  keep_ds <- if (CCI_POST_CANCER_FILTER == "All") {
+    names(.cci_all_datasets)
+  } else {
+    names(.cci_all_datasets)[.cci_all_cancer[names(.cci_all_datasets)] == CCI_POST_CANCER_FILTER]
+  }
+  CCI_POST_DATASETS <- .cci_all_datasets[keep_ds]
+  CCI_POST_CANCER   <- .cci_all_cancer[keep_ds]
+}
+cci_mats <- lapply(CCI_POST_DATASETS, build_cci_logfc_mat)
+cci_feat <- build_gene_dataset_cci_feat_mat(cci_mats, CCI_POST_CANCER)
+feat_mat_cci    <- cci_feat$feat_mat
+labels_gd_cci   <- cci_feat$labels_gd
+genes_gd_cci    <- cci_feat$genes_gd
+datasets_gd_cci <- cci_feat$datasets_gd
+cancer_gd_cci   <- cci_feat$cancer_gd
+
+n_obs_per_cci <- colSums(!is.na(feat_mat_cci))
+cci_var <- apply(feat_mat_cci, 2, function(x) var(x, na.rm = TRUE))
+cci_var[n_obs_per_cci < MIN_OBS_PER_CCI] <- NA_real_
+eligible <- !is.na(cci_var)
+var_cutoff <- quantile(cci_var[eligible], probs = 1 - TOP_VAR_CCI_PCT, na.rm = TRUE)
+top_var_ccis <- names(cci_var)[eligible & cci_var >= var_cutoff]
+feat_mat_hvg <- feat_mat_cci[, top_var_ccis, drop = FALSE]
+message(sprintf("HVG CCIs for limma: %d / %d eligible", length(top_var_ccis), sum(eligible)))
+
+cci_post_out_tag <- tolower(CCI_POST_CANCER_FILTER)
+cci_umap_title_suffix <- if (CCI_POST_CANCER_FILTER == "All") {
+  "All Cancer Types"
+} else {
+  paste0(CCI_POST_CANCER_FILTER, " Only")
+}
+cci_umap_colors <- .cci_post_colors[unique(datasets_gd_cci)]
+
+# ── 1. limma::removeBatchEffect (column-mean imputation for NA only) ──────────
+feat_mat_hvg_na <- feat_mat_hvg
+feat_mat_hvg_imp <- impute_col_mean(feat_mat_hvg)
+
+y <- t(feat_mat_hvg_imp)
+batch <- factor(datasets_gd_cci, levels = unique(datasets_gd_cci))
+mod <- model.matrix(~ 0 + factor(genes_gd_cci))
+colnames(mod) <- make.names(colnames(mod))
+
+corrected_y <- tryCatch(
+  limma::removeBatchEffect(y, batch = batch, mod = mod),
+  error = function(e) {
+    message("removeBatchEffect with gene mod failed: ", conditionMessage(e),
+            " — falling back to mod = NULL")
+    limma::removeBatchEffect(y, batch = batch)
+  }
+)
+feat_mat_cci_corrected <- t(corrected_y)
+rownames(feat_mat_cci_corrected) <- labels_gd_cci
+message("Batch-corrected matrix: ", nrow(feat_mat_cci_corrected), " × ",
+        ncol(feat_mat_cci_corrected))
+
+saveRDS(
+  list(
+    feat_mat_cci           = feat_mat_cci,
+    feat_mat_hvg           = feat_mat_hvg,
+    feat_mat_hvg_na        = feat_mat_hvg_na,
+    feat_mat_cci_corrected = feat_mat_cci_corrected,
+    top_var_ccis           = top_var_ccis,
+    batch                  = batch,
+    labels_gd              = labels_gd_cci,
+    genes_gd               = genes_gd_cci,
+    datasets_gd            = datasets_gd_cci
+  ),
+  file.path(OUTPUT_DIR, sprintf("cci_post_analysis_matrices_%s.rds", cci_post_out_tag))
+)
+message("Post-analysis matrices saved to RDS.")
+
+# ── 2. Validation UMAPs: raw / HVG / batch-corrected ────────────────────────
+n_cci_raw <- ncol(feat_mat_cci)
+n_cci_hvg <- ncol(feat_mat_hvg)
+
+plot_gene_dataset_cci_umap(
+  feat_mat_cci, labels_gd_cci, genes_gd_cci, datasets_gd_cci, cancer_gd_cci,
+  cci_umap_colors,
+  title    = paste0("Gene × Dataset UMAP — CCI LogFC (", cci_umap_title_suffix, ")"),
+  subtitle = sprintf("Raw | %d union CCIs | NA imputed as 0 for UMAP only", n_cci_raw),
+  out_file = file.path(OUTPUT_DIR, sprintf("gene_dataset_cci_umap_raw_%s.png", cci_post_out_tag))
+)
+
+plot_gene_dataset_cci_umap(
+  feat_mat_hvg, labels_gd_cci, genes_gd_cci, datasets_gd_cci, cancer_gd_cci,
+  cci_umap_colors,
+  title    = paste0("Gene × Dataset UMAP — HVG CCIs (", cci_umap_title_suffix, ")"),
+  subtitle = sprintf("Top %.0f%% variable CCIs (%d features) | NA imputed as 0 for UMAP",
+                     TOP_VAR_CCI_PCT * 100, n_cci_hvg),
+  out_file = file.path(OUTPUT_DIR, sprintf("gene_dataset_cci_umap_hvg_%s.png", cci_post_out_tag))
+)
+
+plot_gene_dataset_cci_umap(
+  feat_mat_cci_corrected, labels_gd_cci, genes_gd_cci, datasets_gd_cci, cancer_gd_cci,
+  cci_umap_colors,
+  title    = paste0("Gene × Dataset UMAP — Batch-Corrected CCI LogFC (",
+                    cci_umap_title_suffix, ")"),
+  subtitle = sprintf("HVG (%d CCIs) + limma::removeBatchEffect(batch=dataset) | NA→0 for UMAP",
+                     n_cci_hvg),
+  out_file = file.path(OUTPUT_DIR, sprintf("gene_dataset_cci_umap_corrected_%s.png",
+                                          cci_post_out_tag))
+)
+
+} # end for (CCI_POST_CANCER_FILTER)
+
+# Expose for inspection
+# View(feat_mat_cci)
+# View(feat_mat_hvg)
+# View(feat_mat_cci_corrected)
+# top_var_ccis
+```

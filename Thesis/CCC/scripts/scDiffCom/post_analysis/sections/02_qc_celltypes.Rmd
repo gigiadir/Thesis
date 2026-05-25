@@ -1,0 +1,298 @@
+# Data quality checks
+
+```{r celltype-noise-diagnostics}
+# Uses .malignant.orig (all interactions, before unknown-celltype removal)
+# to quantify how much "other/unknown/equivocal" noise each dataset contains.
+QC_OUTPUT_DIR <- "~/Thesis/CCC/outputs/scDiffCom/plots/v2/qualityCheck"
+dir.create(QC_OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+malignant_orig_catalog <- .hnsc_malignant_orig_catalog()
+
+# ── Count interactions per gene per dataset ───────────────────────────────────
+noise_counts_gene <- purrr::imap_dfr(malignant_orig_catalog, function(gene_list, ds_full) {
+  purrr::imap_dfr(gene_list, function(df, gene) {
+    if (nrow(df) == 0) return(NULL)
+    n_other <- sum(is_unknown_celltype(df$EMITTER_CELLTYPE) |
+                   is_unknown_celltype(df$RECEIVER_CELLTYPE))
+    data.frame(Dataset = ds_full, Gene = gene,
+               Clean = nrow(df) - n_other, Contains_Other = n_other,
+               stringsAsFactors = FALSE)
+  })
+})
+
+# ── Aggregate to dataset level ─────────────────────────────────────────────────
+noise_counts <- noise_counts_gene %>%
+  group_by(Dataset) %>%
+  summarise(Clean = sum(Clean), Contains_Other = sum(Contains_Other), .groups = "drop")
+
+# ── Summary table ─────────────────────────────────────────────────────────────
+table_celltype_noise_stats <- noise_counts %>%
+  left_join(noise_ds_meta, by = c("Dataset" = "ds_full")) %>%
+  mutate(
+    Total_Interactions       = Clean + Contains_Other,
+    Other_Interactions_Count = Contains_Other,
+    Clean_Interactions_Count = Clean,
+    Percent_Noise            = round(100 * Contains_Other / Total_Interactions, 2)
+  ) %>%
+  select(Dataset, Cancer_Type, Total_Interactions,
+         Other_Interactions_Count, Clean_Interactions_Count, Percent_Noise) %>%
+  arrange(Cancer_Type, Dataset)
+
+print(table_celltype_noise_stats)
+View(table_celltype_noise_stats)
+
+# ── Per-gene summary table ─────────────────────────────────────────────────────
+table_celltype_noise_gene_stats <- noise_counts_gene %>%
+  left_join(noise_ds_meta, by = c("Dataset" = "ds_full")) %>%
+  mutate(
+    Total_Interactions       = Clean + Contains_Other,
+    Other_Interactions_Count = Contains_Other,
+    Clean_Interactions_Count = Clean,
+    Percent_Noise            = round(100 * Contains_Other / Total_Interactions, 2)
+  ) %>%
+  select(Dataset, Cancer_Type, Gene, Total_Interactions,
+         Other_Interactions_Count, Clean_Interactions_Count, Percent_Noise) %>%
+  arrange(Cancer_Type, Dataset, Gene)
+
+print(table_celltype_noise_gene_stats)
+View(table_celltype_noise_gene_stats)
+
+# ── Long format for plotting ───────────────────────────────────────────────────
+noise_long <- noise_counts %>%
+  left_join(noise_ds_meta, by = c("Dataset" = "ds_full")) %>%
+  pivot_longer(c(Clean, Contains_Other),
+               names_to = "Category", values_to = "Count") %>%
+  mutate(
+    Category = factor(
+      dplyr::recode(Category, Contains_Other = "Contains Other"),
+      levels = c("Clean", "Contains Other")
+    ),
+    ds_short = factor(ds_short, levels = noise_ds_meta$ds_short)
+  )
+
+# ── Plot aesthetics ────────────────────────────────────────────────────────────
+fill_palette <- c("Clean" = "#4DAF4A", "Contains Other" = "#E41A1C")
+# X-axis label colours follow cancer type: Breast = red, Lung = blue, H&N = darkgreen
+x_label_cols <- dplyr::case_when(
+  noise_ds_meta$Cancer_Type == "Breast" ~ "#E41A1C",
+  noise_ds_meta$Cancer_Type == "Lung"   ~ "#377EB8",
+  noise_ds_meta$Cancer_Type == "H&N"    ~ "#33A02C",
+  TRUE ~ "black"
+)
+
+# ── Plot 1: Absolute counts ────────────────────────────────────────────────────
+p_noise_counts <- ggplot(noise_long,
+                         aes(x = ds_short, y = Count, fill = Category)) +
+  geom_col(position = "stack", width = 0.7) +
+  scale_fill_manual(values = fill_palette) +
+  scale_y_continuous(labels = scales::comma) +
+  theme_classic(base_size = 13) +
+  theme(
+    axis.text.x     = element_text(angle = 45, hjust = 1, colour = x_label_cols),
+    legend.position = "right"
+  ) +
+  labs(
+    title    = "Celltype Noise in Malignant Interaction Pool",
+    subtitle = "X-axis labels: red = Breast, blue = Lung, green = H&N",
+    x = NULL, y = "Number of Interactions", fill = "Category"
+  )
+
+print(p_noise_counts)
+ggsave(file.path(QC_OUTPUT_DIR, "celltype_noise_counts.png"),
+       plot = p_noise_counts, width = 9, height = 6, dpi = 300)
+message("Saved celltype_noise_counts.png")
+
+# ── Plot 2: Proportions ────────────────────────────────────────────────────────
+p_noise_props <- ggplot(noise_long,
+                        aes(x = ds_short, y = Count, fill = Category)) +
+  geom_col(position = "fill", width = 0.7) +
+  scale_fill_manual(values = fill_palette) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_classic(base_size = 13) +
+  theme(
+    axis.text.x     = element_text(angle = 45, hjust = 1, colour = x_label_cols),
+    legend.position = "right"
+  ) +
+  labs(
+    title    = "Proportion of Celltype Noise in Malignant Interaction Pool",
+    subtitle = "X-axis labels: red = Breast, blue = Lung, green = H&N",
+    x = NULL, y = "Proportion of Interactions", fill = "Category"
+  )
+
+print(p_noise_props)
+ggsave(file.path(QC_OUTPUT_DIR, "celltype_noise_proportions.png"),
+       plot = p_noise_props, width = 9, height = 6, dpi = 300)
+message("Saved celltype_noise_proportions.png")
+
+# ── Plot 3: Per-gene % noise heatmap (Gene × Dataset) ─────────────────────────
+noise_gene_tile <- noise_counts_gene %>%
+  left_join(noise_ds_meta, by = c("Dataset" = "ds_full")) %>%
+  mutate(
+    Percent_Noise = 100 * Contains_Other / (Clean + Contains_Other),
+    ds_short      = factor(ds_short, levels = noise_ds_meta$ds_short)
+  )
+
+n_genes_tile <- length(unique(noise_gene_tile$Gene))
+
+p_gene_heatmap <- ggplot(noise_gene_tile,
+                         aes(x = ds_short, y = Gene, fill = Percent_Noise)) +
+  geom_tile(colour = "white", linewidth = 0.3) +
+  scale_fill_gradient2(
+    low = "#4DAF4A", mid = "#ffffbf", high = "#E41A1C",
+    midpoint = 50, limits = c(0, 100), name = "% Noise"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, colour = x_label_cols),
+    axis.text.y = element_text(size = max(4, 180 / n_genes_tile))
+  ) +
+  labs(
+    title    = "Celltype Noise per Gene per Dataset",
+    subtitle = "Color = % interactions containing 'other/unknown/equivocal' cell type\nX-axis labels: red = Breast, blue = Lung, green = H&N",
+    x = NULL, y = "Gene"
+  )
+
+print(p_gene_heatmap)
+ggsave(file.path(QC_OUTPUT_DIR, "celltype_noise_gene_heatmap.png"),
+       plot = p_gene_heatmap,
+       width  = 9,
+       height = max(6, n_genes_tile * 0.25),
+       dpi    = 300)
+message("Saved celltype_noise_gene_heatmap.png")
+```
+
+## Cell-type interaction distributions
+
+```{r qc-celltype-distributions}
+library(ggalluvial)
+
+# ── 1. Data Preparation ───────────────────────────────────────────────────────
+# Flatten malignant_orig_catalog (list of datasets → list of genes → data frames)
+# into one tidy data frame: Dataset | Gene | EMITTER | RECEIVER
+qc_interactions <- purrr::imap_dfr(malignant_orig_catalog, function(gene_list, ds_full) {
+  ds_short <- noise_ds_meta$ds_short[noise_ds_meta$ds_full == ds_full]
+  purrr::imap_dfr(gene_list, function(df, gene) {
+    if (is.null(df) || nrow(df) == 0) return(NULL)
+    data.frame(
+      Dataset  = ds_short,
+      Gene     = gene,
+      EMITTER  = df$EMITTER_CELLTYPE,
+      RECEIVER = df$RECEIVER_CELLTYPE,
+      stringsAsFactors = FALSE
+    )
+  })
+})
+
+# Dataset factor ordered as in noise_ds_meta
+qc_interactions$Dataset <- factor(qc_interactions$Dataset,
+                                  levels = noise_ds_meta$ds_short)
+
+# Aggregate: count interactions per Dataset × EMITTER × RECEIVER
+qc_counts <- qc_interactions %>%
+  count(Dataset, EMITTER, RECEIVER, name = "n_interactions")
+
+# Consistent cell-type order (most active first) for both axes
+ct_order <- qc_interactions %>%
+  count(EMITTER, name = "n") %>%
+  arrange(desc(n)) %>%
+  pull(EMITTER) %>%
+  unique()
+
+qc_counts <- qc_counts %>%
+  mutate(
+    EMITTER  = factor(EMITTER,  levels = rev(ct_order)),  # y-axis: top = most active
+    RECEIVER = factor(RECEIVER, levels = ct_order)
+  )
+
+message("QC data prepared: ", nrow(qc_counts),
+        " Dataset × EMITTER × RECEIVER combinations")
+
+# ── 2. Faceted Heatmap ────────────────────────────────────────────────────────
+p_qc_heatmap <- ggplot(qc_counts,
+                       aes(x = RECEIVER, y = EMITTER, fill = n_interactions)) +
+  geom_tile(colour = "white", linewidth = 0.3) +
+  scale_fill_gradient(low = "#ccd9ff", high = "#08306b",
+                      name = "# interactions",
+                      labels = scales::comma) +
+  facet_wrap(~ Dataset, ncol = 3) +
+  theme_classic(base_size = 10) +
+  theme(
+    axis.text.x      = element_text(angle = 45, hjust = 1, size = 7),
+    axis.text.y      = element_text(size = 7),
+    strip.background = element_rect(fill = "#e8e8e8", colour = NA),
+    strip.text       = element_text(face = "bold"),
+    panel.spacing    = unit(0.5, "lines")
+  ) +
+  labs(
+    title    = "Cell-Type Interaction Counts per Dataset (unfiltered)",
+    subtitle = "'Other/Unknown/Equivocal' cell types included — rows = Emitter, cols = Receiver",
+    x = "Receiver Cell Type", y = "Emitter Cell Type"
+  )
+
+print(p_qc_heatmap)
+ggsave(file.path(QC_OUTPUT_DIR, "qc_celltype_heatmap.png"),
+       plot = p_qc_heatmap, width = 18, height = 10, dpi = 300)
+message("Saved qc_celltype_heatmap.png")
+
+# ── 3. Sankey / Alluvial Diagram (aggregated across all datasets) ─────────────
+TOP_PAIRS_SANKEY <- 20   # keep top N Emitter→Receiver pairs
+
+qc_alluvial_data <- qc_interactions %>%
+  count(EMITTER, RECEIVER, name = "n_interactions") %>%
+  arrange(desc(n_interactions)) %>%
+  slice_head(n = TOP_PAIRS_SANKEY)
+
+# sqrt(n) transform: compresses Epithelial's dominant band while keeping
+# smaller categories (Hematopoietic, Myeloid, …) visually distinct.
+p_qc_sankey <- ggplot(
+  qc_alluvial_data,
+  aes(axis1 = EMITTER, axis2 = RECEIVER, y = sqrt(n_interactions))
+) +
+  # Sigmoid curves look cleaner than the default splines
+  geom_alluvium(aes(fill = EMITTER), width = 1/10, alpha = 0.65,
+                curve_type = "sigmoid") +
+  geom_stratum(width = 1/4, fill = "grey92", colour = "grey55",
+               linewidth = 0.4) +
+  # hjust = "outward" floats every label outside its stratum box so labels
+  # for small categories don't collide with the flows or each other.
+  geom_text(
+    stat     = "stratum",
+    aes(label = after_stat(stratum)),
+    hjust    = "outward",
+    size     = 3.2,
+    fontface = "bold"
+  ) +
+  scale_x_discrete(
+    limits = c("Emitter", "Receiver"),
+    expand = c(0.35, 0.35)   # extra horizontal room for outward labels
+  ) +
+  theme_void(base_size = 13) +
+  theme(
+    axis.text.x     = element_text(face = "bold", size = 13,
+                                   margin = margin(b = 6)),
+    plot.title      = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle   = element_text(size = 10, colour = "grey40", hjust = 0.5),
+    plot.margin     = margin(12, 40, 12, 40),
+    legend.position = "none"
+  ) +
+  labs(
+    title    = sprintf(
+      "Cell-Type Interaction Flow — Top %d Emitter→Receiver Pairs (All Datasets)",
+      TOP_PAIRS_SANKEY)  )
+
+print(p_qc_sankey)
+ggsave(file.path(QC_OUTPUT_DIR, "qc_celltype_sankey.png"),
+       plot = p_qc_sankey, width = 14, height = 9, dpi = 300)
+message("Saved qc_celltype_sankey.png")
+
+# ── 4. Top-10 Summary Table ───────────────────────────────────────────────────
+qc_top10 <- qc_interactions %>%
+  mutate(ER_CELLTYPES = paste0(EMITTER, "_", RECEIVER)) %>%
+  count(ER_CELLTYPES, EMITTER, RECEIVER, name = "n_interactions") %>%
+  arrange(desc(n_interactions)) %>%
+  slice_head(n = 10)
+
+message("\nTop 10 most frequent Emitter→Receiver pairs (across all datasets):")
+print(qc_top10)
+View(qc_top10)
+```

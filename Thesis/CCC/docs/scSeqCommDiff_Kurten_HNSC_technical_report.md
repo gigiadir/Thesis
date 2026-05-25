@@ -186,7 +186,7 @@ Only interactions where **`Tumor` is sender or receiver** are interpreted in dow
 | **Tumor → X** | `Tumor → Fibroblast`, AXL–? | Tumor-secreted ligand; receiver stroma/immune response |
 | **Excluded** | `CD8T → Macrophage` | Dropped from `differential_comm_Tumor_involved.tsv` |
 
-This mirrors the malignant-focused filter in [`scDiffCom-PostAnalysis.Rmd`](../scripts/scDiffCom-PostAnalysis.Rmd) (`EMITTER_CELLTYPE` / `RECEIVER_CELLTYPE` ∈ Tumor).
+This mirrors the malignant-focused filter in [scDiffCom post-analysis](../scripts/scDiffCom/post_analysis/README.md) (`EMITTER_CELLTYPE` / `RECEIVER_CELLTYPE` ∈ Tumor; entry point `index.Rmd` or wrapper `scDiffCom-PostAnalysis.Rmd`).
 
 ### 3.3 What the AXL filter yields (within Tumor subset)
 

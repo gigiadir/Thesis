@@ -1,0 +1,9 @@
+# Per-dataset LRI heatmaps
+
+```{r genes-lri-plots}
+library(umap)
+plot_lri_heatmap_umap(Kurten_HNSC.malignant, "Kurten_HNSC")
+plot_lri_heatmap_umap(Puram_HNSC.malignant,  "Puram_HNSC")
+plot_lri_heatmap_umap(Choi_HNSC.malignant,   "Choi_HNSC")
+plot_lri_heatmap_umap(Bill_HNSC.malignant,   "Bill_HNSC")
+```
