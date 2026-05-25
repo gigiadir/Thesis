@@ -2,11 +2,27 @@
 
 | Path | Purpose |
 |------|---------|
-| [scDiffCom/post_analysis/](scDiffCom/post_analysis/) | **Post-analysis** — cross-cohort H&N comparison (knit `index.Rmd`) |
+| [scDiffCom/](scDiffCom/) | **scDiffCom workflow** — preprocess → pipeline → post_analysis |
+| [scDiffCom/post_analysis/](scDiffCom/post_analysis/) | Cross-cohort H&N comparison (knit `index.Rmd`) |
 | [scDiffCom-PostAnalysis.Rmd](scDiffCom-PostAnalysis.Rmd) | Legacy wrapper → `post_analysis/index.Rmd` |
-| `Main-scDiffComPipeline.R`, `scDiffComPipeline.R` | Cluster / local scDiffCom runs |
-| `Main-scDiffComPreprocess.R`, `scDiffComPreprocess*.R` | Preprocessing before pipeline |
+| [tutorials/](tutorials/) | CellChat, NicheNet, exploratory notebooks |
 | [utils/](utils/) | Shared R utilities (`Utils.R`, Seurat helpers, etc.) |
-| `*Tutorial.Rmd`, `*Playground.Rmd` | Exploratory notebooks |
+| [SYNC_TO_SCRIPTS.md](SYNC_TO_SCRIPTS.md) | Copy pipeline edits to `~/Scripts` for cluster |
 
-Pipeline outputs are read from `~/CCC-scDiffCom/results/` (see post-analysis `R/00_setup.R`).
+## scDiffCom layout
+
+```
+scDiffCom/
+  preprocess/   # pseudobulk, rank genes → CCC-PreProcess
+  pipeline/     # scDiffCom jobs → CCC-scDiffCom (sync to ~/Scripts)
+  post_analysis/  # knit index.Rmd
+```
+
+## Root stubs
+
+| Stub | Redirects to |
+|------|----------------|
+| `Main-scDiffComPipeline.R` | `scDiffCom/pipeline/Main-scDiffComPipeline.R` |
+| `Main-scDiffComPreprocess.R` | `scDiffCom/preprocess/Main-scDiffComPreprocess.R` |
+
+Pipeline outputs: `~/CCC-scDiffCom/results/`. Post-analysis plot paths: `scDiffCom/post_analysis/R/00_setup.R`.
