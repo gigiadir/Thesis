@@ -2,7 +2,7 @@
 
 Typical order:
 
-1. `Rscript createPseudobulkMatrix.R --dataset_name <cohort>`
+1. `Rscript createPseudobulkMatrix.R --dataset_name <cohort>` (patients need `> 50` malignant cells; set one `malignant_cell_type` per dataset: `Epithelial`, `Malignant`, `Tumor`, or `Cancer`)
 2. `Rscript scDiffCom-Preprocess-RankGenes.R --dataset_name <cohort>` (production pipeline input)
 3. Optional: `scDiffCom-Preprocess-ExpressionQuantile.R`, `scDiffCom-Preprocess-Residual.R`, `scDiffCom-Preprocess-PatientZScore.R`
 4. Optional: `compareExpressionSplitEquivalence.R` (legacy vs pseudobulk expression quantile)
@@ -34,8 +34,8 @@ Summaries: `~/Thesis/CCC/outputs/QC/split_equivalence/expression_quantile_equiva
 
 **Known reasons for disagreement** (even with identical quantile code):
 
-- Legacy uses malignant labels `Epithelial`, `Malignant`, `Tumor`, `Cancer`; pseudobulk config uses `Tumor` only.
-- Legacy keeps patients with `> 50` malignant cells; pseudobulk drops patients with no malignant cells.
+- Pseudobulk uses one `malignant_cell_type` per dataset; legacy uses all of `MALIGNANT_CELLS` — pick the label that matches your cohort (often `Tumor` for HNSC).
+- Rebuild pseudobulk after changing filters (`createPseudobulkMatrix.R` uses `> 50` malignant cells by default, same as legacy).
 - Different gene sets (legacy runs one gene per job; pseudobulk is full matrix).
 
 If `max_abs_mean_expr_diff` is near zero but labels differ, check quantile tie-breaking; if diffs are large, filtering or cell-type definitions differ.
