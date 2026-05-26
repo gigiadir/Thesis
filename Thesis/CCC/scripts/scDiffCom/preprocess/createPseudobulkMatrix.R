@@ -33,7 +33,7 @@ source(file.path(script_dir, "rankGenesSplitUtils.R"))
 
 SAVE_MATRICES <- TRUE
 SAVE_PER_DATASET_RDS <- TRUE
-SAVE_ALL_AS_RDATA <- TRUE
+SAVE_ALL_AS_RDATA <- FALSE
 OUT_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
 MIN_DETECT_FRAC_IN_MALIGNANT <- 0.05
 GENE_SOURCES_SUFFIX <- "_pseudobulk_gene_sources.tsv"
