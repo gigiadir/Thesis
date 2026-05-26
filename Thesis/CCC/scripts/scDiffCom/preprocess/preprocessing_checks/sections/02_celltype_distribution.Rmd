@@ -1,0 +1,24 @@
+# Cell-type distribution per patient
+
+```{r celltype-distribution}
+Kurten_HNSC.AXL.plot <- plot_patient_composition(
+  obj = Kurten_HNSC.AXL$seurat,
+  patient_summary = Kurten_HNSC.AXL$patient_summary,
+  gene_col_exp_name = "AXL_EXP",
+  ds_name = "Kurten - H&N",
+  patient_col_in_seurat = "Patient",
+  cell_type_column = "Cell_Type",
+  use_proportions = TRUE
+)
+
+dir.create(CELLTYPE_QC_DIR, recursive = TRUE, showWarnings = FALSE)
+
+# ggsave(file.path(CELLTYPE_QC_DIR, "Qian2020_Breast_AXL_cell_type_distribution_original_cell_type.png"),    Qian.AXL.plot,    width = 20, height = 6)
+# ggsave(file.path(CELLTYPE_QC_DIR, "Chan2021_Lung_AXL_cell_type_distribution.png"),      Chan.AXL.plot,    width = 20, height = 6)
+# ggsave(file.path(CELLTYPE_QC_DIR, "Laughney2020_Lung_AXL_cell_type_distribution.png"),  Laughney.AXL.plot, width = 20, height = 6)
+# ggsave(file.path(CELLTYPE_QC_DIR, "Bassez2021_Breast_AXL_cell_type_distribution.png"),  Bassez.AXL.plot,  width = 20, height = 6)
+ggplot2::ggsave(
+  file.path(CELLTYPE_QC_DIR, "Kurten_HNSC_AXL_cell_Type_distribution.png"),
+  Kurten_HNSC.AXL.plot, width = 20, height = 6
+)
+```

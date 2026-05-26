@@ -1,0 +1,82 @@
+# Gene dispersion: pseudobulk expression vs patient splits
+
+Compare per-gene cross-patient dispersion in **continuous pseudobulk expression** vs **discrete HIGH/LOW/MID** patient classifications.
+
+- **Expression metric:** row-wise SD of raw pseudobulk values.
+- **Split metric:** row-wise SD of numeric-encoded labels (`LOW=1`, `MID=2`, `HIGH=3`).
+
+`SPLIT_SOURCE` in [config/hnsc_preprocess_checks.R](../config/hnsc_preprocess_checks.R) selects which classification pipeline to use.
+
+```{r gene-dispersion-expr-vs-split, message=FALSE, warning=FALSE}
+dir.create(DISPERSION_DIR, recursive = TRUE, showWarnings = FALSE)
+
+for (ds in DATASETS) {
+  message("\n=== ", ds, " ===")
+
+  pb_path <- tryCatch(
+    resolve_pseudobulk_path(ds, PSEUDOBULK_DIR),
+    error = function(e) {
+      message("  Pseudobulk not found: ", conditionMessage(e))
+      NULL
+    }
+  )
+  if (is.null(pb_path)) next
+
+  message("  Loading pseudobulk: ", pb_path)
+  expr_mat <- load_gene_patient_matrix(pb_path)
+
+  for (src in split_sources) {
+    message("  Split source: ", src, " (", split_source_labels[[src]], ")")
+
+    splits_mat <- load_splits_for_source(src, ds, expr_mat)
+    if (is.null(splits_mat)) {
+      message("  No splits found for ", src, " — skipping.")
+      next
+    }
+
+    aligned <- align_matrices(expr_mat, splits_mat)
+    if (is.null(aligned)) {
+      message("  No overlapping genes/patients between pseudobulk and splits — skipping.")
+      next
+    }
+
+    message(sprintf(
+      "  Aligned: %d genes x %d patients",
+      nrow(aligned$expr), ncol(aligned$expr)
+    ))
+
+    sd_expr <- row_dispersion_expr(aligned$expr)
+    sd_split <- row_dispersion_split(aligned$splits)
+    names(sd_expr) <- rownames(aligned$expr)
+    names(sd_split) <- rownames(aligned$splits)
+
+    cmp_df <- compare_dispersion(sd_expr, sd_split)
+    if (nrow(cmp_df) == 0L) {
+      message("  No genes with valid paired dispersion — skipping.")
+      next
+    }
+
+    stats <- run_dispersion_stats(cmp_df)
+    message(sprintf(
+      paste0(
+        "  n=%d | median SD_expr=%.4f | median SD_split=%.4f | median ratio=%.4f\n",
+        "  Wilcoxon (two-sided) p=%.2e | split>expr p=%.2e | split<expr p=%.2e\n",
+        "  Spearman rho=%.3f (p=%.2e)"
+      ),
+      stats$n_genes, stats$median_sd_expr, stats$median_sd_split, stats$median_ratio,
+      stats$wilcox_p, stats$wilcox_p_split_gt_expr, stats$wilcox_p_split_lt_expr,
+      stats$spearman_rho, stats$spearman_p
+    ))
+
+    p <- plot_dispersion_scatter(cmp_df, ds, src, split_source_labels[[src]])
+    print(p)
+
+    out_png <- file.path(DISPERSION_DIR, paste0(ds, "_", src, "_expr_vs_split_dispersion.png"))
+    ggplot2::ggsave(out_png, p, width = 8, height = 6, dpi = 300)
+    message("  Saved: ", out_png)
+
+    out_csv <- file.path(DISPERSION_DIR, paste0(ds, "_", src, "_expr_vs_split_dispersion.csv"))
+    utils::write.csv(cmp_df, out_csv, row.names = FALSE)
+  }
+}
+```

@@ -1,0 +1,45 @@
+# Data validation: split category distribution per patient
+
+Compare LOW/MID/HIGH counts per patient across split methods (`SPLIT_SOURCE` in config).
+
+```{r split-category-distribution, message=FALSE, warning=FALSE}
+dir.create(CATEGORY_QC_DIR, recursive = TRUE, showWarnings = FALSE)
+
+for (ds in DATASETS) {
+  message("\n=== Category distribution: ", ds, " ===")
+  comparison_counts <- list()
+
+  for (src in split_sources) {
+    base_dir <- SPLIT_BASE_DIRS[[src]]
+    source_label <- split_source_labels[[src]]
+    message("  Source: ", src, " (", source_label, ")")
+
+    long_df <- read_grouped_splits_long(base_dir, ds)
+    if (is.null(long_df)) {
+      message("  No grouped .rds under ", file.path(base_dir, ds), " — skipping.")
+      next
+    }
+
+    count_df <- summarize_category_counts(long_df)
+
+    p <- plot_split_category_per_patient(count_df, ds, source_label)
+    print(p)
+
+    out_png <- file.path(CATEGORY_QC_DIR, paste0(ds, "_", src, "_split_category_per_patient.png"))
+    ggplot2::ggsave(out_png, p, width = 10, height = 6, dpi = 300)
+    message("  Saved: ", out_png)
+
+    comparison_counts[[src]] <- count_df %>%
+      dplyr::mutate(split_source = factor(source_label))
+  }
+
+  if (length(comparison_counts) >= 2L) {
+    combined <- dplyr::bind_rows(comparison_counts)
+    p_cmp <- plot_split_category_comparison(combined, ds)
+    print(p_cmp)
+    cmp_png <- file.path(CATEGORY_QC_DIR, paste0(ds, "_split_category_comparison_facets.png"))
+    ggplot2::ggsave(cmp_png, p_cmp, width = 10, height = 4 * length(comparison_counts), dpi = 300)
+    message("  Saved comparison: ", cmp_png)
+  }
+}
+```

@@ -1,0 +1,64 @@
+---
+title: "scDiffCom Preprocessing Checks (H&N)"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+QC notebook for preprocess outputs: Seurat composition, integration, split-category distributions, dispersion, and profile PCA.
+
+See [README.md](README.md) for section map and partial-run notes.
+
+```{r setup-preprocessing-checks, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = TRUE,
+  warning = TRUE,
+  fig.width = 10,
+  fig.height = 7
+)
+
+PREPROCESS_CHECKS_DIR <- normalizePath(".", winslash = "/")
+PREPROCESS_DIR <- normalizePath(file.path(PREPROCESS_CHECKS_DIR, ".."), winslash = "/")
+PROJECT_SCRIPTS <- normalizePath(file.path(PREPROCESS_CHECKS_DIR, "..", "..", ".."), winslash = "/")
+
+source(file.path(PREPROCESS_CHECKS_DIR, "R/00_setup.R"))
+source(file.path(PREPROCESS_CHECKS_DIR, "config/hnsc_preprocess_checks.R"))
+source(file.path(PREPROCESS_CHECKS_DIR, "R/01_seurat_loaders.R"))
+source(file.path(PREPROCESS_CHECKS_DIR, "R/02_integration_helpers.R"))
+source(file.path(PREPROCESS_CHECKS_DIR, "R/03_split_qc_helpers.R"))
+source(file.path(PREPROCESS_CHECKS_DIR, "R/04_category_distribution.R"))
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(Seurat)
+
+if (!requireNamespace("patchwork", quietly = TRUE)) {
+  message("patchwork not installed — profile PCA section may fail.")
+} else {
+  library(patchwork)
+}
+```
+
+```{r child = "sections/01_load_axl_cohorts.Rmd"}
+```
+
+```{r child = "sections/02_celltype_distribution.Rmd"}
+```
+
+```{r child = "sections/03_merge_combat_umap.Rmd"}
+```
+
+```{r child = "sections/04_split_category_distribution.Rmd"}
+```
+
+```{r child = "sections/05_ctla4_atlas_sanity.Rmd"}
+```
+
+```{r child = "sections/06_gene_dispersion.Rmd"}
+```
+
+```{r child = "sections/07_gene_profile_pca.Rmd"}
+```

@@ -1,0 +1,100 @@
+# Gene patient-wise profiles: PCA in expression vs split space
+
+Each **gene** is a point in patient space. Rows are row z-scored. **Profile correlation** measures how well split labels track expression patterns per gene.
+
+```{r gene-profile-pca-expr-vs-split, message=FALSE, warning=FALSE}
+dir.create(PROFILE_PCA_DIR, recursive = TRUE, showWarnings = FALSE)
+
+for (ds in DATASETS) {
+  message("\n=== Profile PCA: ", ds, " ===")
+
+  pb_path <- tryCatch(
+    resolve_pseudobulk_path(ds, PSEUDOBULK_DIR),
+    error = function(e) NULL
+  )
+  if (is.null(pb_path)) next
+
+  expr_mat <- load_gene_patient_matrix(pb_path)
+
+  for (src in split_sources) {
+    message("  Source: ", src)
+
+    splits_mat <- load_splits_for_source(src, ds, expr_mat)
+    if (is.null(splits_mat)) next
+
+    aligned <- align_matrices(expr_mat, splits_mat)
+    if (is.null(aligned)) next
+
+    aligned$expr <- drop_sparse_patients(aligned$expr, label = paste0(ds, " expression"))
+    if (ncol(aligned$expr) < MIN_PATIENTS) {
+      message("  Too few patients after expression NA filter — skipping.")
+      next
+    }
+    aligned$splits <- aligned$splits[, colnames(aligned$expr), drop = FALSE]
+
+    split_num <- encode_splits(aligned$splits)
+    z_expr <- row_zscore_matrix(aligned$expr)
+    z_split <- row_zscore_matrix(split_num)
+
+    z_pair <- drop_sparse_patients_pair(z_expr, z_split)
+    z_expr <- z_pair$expr
+    z_split <- z_pair$split
+    message(sprintf("  PCA / profiles use %d patients: %s",
+                    length(z_pair$patients), paste(z_pair$patients, collapse = ", ")))
+
+    profile_cor <- row_profile_correlation(z_expr, z_split)
+    profile_cor <- profile_cor[is.finite(profile_cor)]
+
+    pca_expr <- pca_genes(z_expr, label = paste0(ds, " expression"))
+    pca_split <- pca_genes(z_split, label = paste0(ds, " split"))
+
+    df_expr <- build_profile_pca_df(pca_expr, "Expression")
+    df_split <- build_profile_pca_df(pca_split, "Split")
+    plot_df <- dplyr::bind_rows(df_expr, df_split) %>%
+      dplyr::left_join(
+        data.frame(gene = names(profile_cor), profile_cor = unname(profile_cor),
+                   stringsAsFactors = FALSE),
+        by = "gene"
+      )
+
+    metrics_df <- data.frame(
+      gene = names(profile_cor),
+      profile_cor = unname(profile_cor),
+      PC1_expr = df_expr$PC1[match(names(profile_cor), df_expr$gene)],
+      PC2_expr = df_expr$PC2[match(names(profile_cor), df_expr$gene)],
+      PC1_split = df_split$PC1[match(names(profile_cor), df_split$gene)],
+      PC2_split = df_split$PC2[match(names(profile_cor), df_split$gene)],
+      stringsAsFactors = FALSE
+    ) %>%
+      dplyr::mutate(
+        pc_dist = sqrt((PC1_expr - PC1_split)^2 + (PC2_expr - PC2_split)^2),
+        low_split_informativeness = profile_cor <= stats::quantile(
+          profile_cor, LABEL_LOW_COR_QUANTILE, na.rm = TRUE
+        )
+      )
+
+    message(sprintf(
+      "  %d genes | median expr–split cor = %.3f | %.1f%% below Q%.0f",
+      nrow(metrics_df),
+      median(metrics_df$profile_cor),
+      100 * mean(metrics_df$low_split_informativeness),
+      100 * LABEL_LOW_COR_QUANTILE
+    ))
+
+    p_pca <- plot_profile_pca(
+      plot_df, df_expr, df_split, ds, split_source_labels[[src]]
+    )
+    print(p_pca)
+
+    p_hist <- plot_profile_cor_hist(metrics_df, ds, split_source_labels[[src]])
+    print(p_hist)
+
+    prefix <- file.path(PROFILE_PCA_DIR, paste0(ds, "_", src))
+    ggplot2::ggsave(paste0(prefix, "_gene_profile_pca.png"), p_pca, width = 14, height = 6, dpi = 300)
+    ggplot2::ggsave(paste0(prefix, "_profile_cor_hist.png"), p_hist, width = 8, height = 5, dpi = 300)
+    utils::write.csv(metrics_df, paste0(prefix, "_gene_profile_metrics.csv"), row.names = FALSE)
+    utils::write.csv(plot_df, paste0(prefix, "_gene_profile_pca_coords.csv"), row.names = FALSE)
+    message("  Saved outputs under ", PROFILE_PCA_DIR)
+  }
+}
+```
