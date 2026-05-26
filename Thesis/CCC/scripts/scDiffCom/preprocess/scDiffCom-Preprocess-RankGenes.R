@@ -22,7 +22,7 @@ script_dir <- if (length(file_arg)) {
 } else {
   normalizePath(".", winslash = "/")
 }
-source(file.path(script_dir, "rankGenesSplitUtils.R"))
+source(file.path(script_dir, "patientSplitUtils.R"))
 
 option_list <- list(
   make_option("--dataset_name", type = "character", default = NULL,

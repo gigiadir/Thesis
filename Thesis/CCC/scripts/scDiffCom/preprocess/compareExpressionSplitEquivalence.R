@@ -21,7 +21,7 @@ script_dir <- if (length(file_arg)) {
 } else {
   normalizePath(".", winslash = "/")
 }
-source(file.path(script_dir, "rankGenesSplitUtils.R"))
+source(file.path(script_dir, "patientSplitUtils.R"))
 
 HNSC_DATASETS <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
 

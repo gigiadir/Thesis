@@ -582,7 +582,7 @@ split_source_labels <- c(
   residual = "Residual tertiles (PC-regressed pseudobulk)"
 )
 
-# ── Shared helpers (rankGenesSplitUtils.R) ────────────────────────────────────
+# ── Shared helpers (patientSplitUtils.R) ────────────────────────────────────
 script_dir <- tryCatch(
   dirname(knitr::current_input(dir = TRUE)),
   error = function(e) NULL
@@ -590,7 +590,7 @@ script_dir <- tryCatch(
 if (is.null(script_dir) || !nzchar(script_dir)) {
   script_dir <- normalizePath(".", winslash = "/")
 }
-source(file.path(script_dir, "rankGenesSplitUtils.R"))
+source(file.path(script_dir, "patientSplitUtils.R"))
 
 LABEL_NUM <- c(LOW = 1, MID = 2, HIGH = 3)
 
@@ -914,7 +914,7 @@ script_dir <- tryCatch(
 if (is.null(script_dir) || !nzchar(script_dir)) {
   script_dir <- normalizePath(".", winslash = "/")
 }
-source(file.path(script_dir, "rankGenesSplitUtils.R"))
+source(file.path(script_dir, "patientSplitUtils.R"))
 
 LABEL_NUM <- c(LOW = 1, MID = 2, HIGH = 3)
 

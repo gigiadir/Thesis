@@ -30,7 +30,8 @@ script_dir <- if (length(file_arg)) {
 } else {
   normalizePath(".", winslash = "/")
 }
-source(file.path(script_dir, "rankGenesSplitUtils.R"))
+source(file.path(script_dir, "scDiffComGenePanel.R"))
+source(file.path(script_dir, "patientSplitUtils.R"))
 
 SAVE_MATRICES <- TRUE
 SAVE_PER_DATASET_RDS <- TRUE
