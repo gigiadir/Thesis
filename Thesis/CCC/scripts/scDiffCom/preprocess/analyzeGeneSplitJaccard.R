@@ -41,7 +41,8 @@ script_dir <- if (length(file_arg)) {
 } else {
   normalizePath(".", winslash = "/")
 }
-source(file.path(script_dir, "rankGenesSplitUtils.R"))
+source(file.path(script_dir, "scDiffComGenePanel.R"))
+source(file.path(script_dir, "patientSplitUtils.R"))
 
 row_zscore_matrix <- function(mat) {
   z <- mat

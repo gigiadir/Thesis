@@ -7,7 +7,8 @@
 #   (2) force-included genes (default: scDiffCom panel + optional --gene_list / config).
 #
 # Matrix values: mean normalized expression (data layer) per patient within malignant cells.
-# Rows = genes, columns = patients (patients with no malignant cells are dropped; see *_dropped_patients.tsv).
+# Rows = genes, columns = patients. Patients must have > min_malignant_cells malignant cells
+# (same default as scDiffComPreprocess.R). Others are logged in *_dropped_patients.tsv.
 # Outputs: OUT_DIR/{dataset}/ holds matrix, gene sources, dropped-patient log, and dims summary per dataset.
 #
 # CLI examples:
@@ -29,13 +30,17 @@ script_dir <- if (length(file_arg)) {
 } else {
   normalizePath(".", winslash = "/")
 }
-source(file.path(script_dir, "rankGenesSplitUtils.R"))
+source(file.path(script_dir, "scDiffComGenePanel.R"))
+source(file.path(script_dir, "patientSplitUtils.R"))
 
 SAVE_MATRICES <- TRUE
 SAVE_PER_DATASET_RDS <- TRUE
 SAVE_ALL_AS_RDATA <- FALSE
 OUT_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
 MIN_DETECT_FRAC_IN_MALIGNANT <- 0.05
+MIN_MALIGNANT_CELLS <- 50L
+ALLOWED_MALIGNANT_CELL_TYPES <- c("Epithelial", "Malignant", "Tumor", "Cancer")
+DEFAULT_MALIGNANT_CELL_TYPE <- "Tumor"
 GENE_SOURCES_SUFFIX <- "_pseudobulk_gene_sources.tsv"
 DROPPED_PATIENTS_SUFFIX <- "_pseudobulk_dropped_patients.tsv"
 
@@ -138,6 +143,28 @@ resolve_force_include_genes <- function(
   unique(unlist(parts, use.names = FALSE))
 }
 
+validate_malignant_cell_type <- function(x, label = "malignant_cell_type") {
+  if (is.null(x)) {
+    stop(label, " is required.")
+  }
+  val <- as.character(x)
+  if (length(val) != 1L || is.na(val) || !nzchar(val)) {
+    stop(
+      label, " must be exactly one of: ",
+      paste(ALLOWED_MALIGNANT_CELL_TYPES, collapse = ", "),
+      " (not a list)."
+    )
+  }
+  if (!val %in% ALLOWED_MALIGNANT_CELL_TYPES) {
+    stop(
+      label, " must be one of: ",
+      paste(ALLOWED_MALIGNANT_CELL_TYPES, collapse = ", "),
+      ". Got: ", val
+    )
+  }
+  val
+}
+
 build_gene_source_table <- function(genes_keep, detected, force_in_assay) {
   detected <- intersect(genes_keep, detected)
   force_only <- setdiff(force_in_assay, detected)
@@ -161,7 +188,8 @@ build_maligexpr_patient_matrix <- function(
     dataset_name,
     patient_col,
     cell_type_column,
-    malignant_cell_type,
+    malignant_cell_type = DEFAULT_MALIGNANT_CELL_TYPE,
+    min_malignant_cells = MIN_MALIGNANT_CELLS,
     min_detect_frac = MIN_DETECT_FRAC_IN_MALIGNANT,
     force_include_genes = character(),
     include_panel = TRUE,
@@ -182,22 +210,83 @@ build_maligexpr_patient_matrix <- function(
     job_force_include_genes = job_force_include_genes
   )
 
-  malig_vals <- as.character(malignant_cell_type)
-  malig_cell_ids <- rownames(obj@meta.data)[
-    as.character(obj@meta.data[[cell_type_column]]) %in% malig_vals
-  ]
+  malignant_cell_type <- validate_malignant_cell_type(malignant_cell_type)
+  min_malignant_cells <- as.integer(min_malignant_cells)
+  if (min_malignant_cells < 0L) {
+    stop("min_malignant_cells must be >= 0. Got: ", min_malignant_cells)
+  }
+
+  meta_full <- obj@meta.data
+  cell_types <- as.character(meta_full[[cell_type_column]])
+  pat_by_cell_all <- setNames(as.character(meta_full[[patient_col]]), rownames(meta_full))
+  pat_by_cell_all <- pat_by_cell_all[names(pat_by_cell_all) %in% colnames(obj)]
+
+  is_malig <- !is.na(cell_types) & cell_types == malignant_cell_type
+  malig_cell_ids <- rownames(meta_full)[is_malig]
   malig_cell_ids <- intersect(malig_cell_ids, colnames(obj))
   if (length(malig_cell_ids) == 0L) {
     stop(
       "No malignant cells for ", dataset_name, " (",
-      cell_type_column, " %in% ", paste(malig_vals, collapse = ", "), ")"
+      cell_type_column, " == '", malignant_cell_type, "')"
     )
   }
 
-  obj_malignant <- subset(x = obj, cells = malig_cell_ids)
+  malig_counts <- table(pat_by_cell_all[malig_cell_ids])
+  valid_patients <- names(malig_counts)[malig_counts > min_malignant_cells]
+  if (length(valid_patients) == 0L) {
+    stop(
+      "No patients with > ", min_malignant_cells,
+      " malignant cells for ", dataset_name, "."
+    )
+  }
+
+  all_patients <- sort(unique(pat_by_cell_all[!is.na(pat_by_cell_all) & pat_by_cell_all != ""]))
+  dropped_patients <- list()
+  for (p in all_patients) {
+    n_malig <- if (p %in% names(malig_counts)) as.integer(malig_counts[[p]]) else 0L
+    if (n_malig == 0L) {
+      dropped_patients[[length(dropped_patients) + 1L]] <- data.frame(
+        patient = p,
+        reason = "no_malignant_cells",
+        n_malignant = n_malig,
+        stringsAsFactors = FALSE
+      )
+    } else if (n_malig <= min_malignant_cells) {
+      dropped_patients[[length(dropped_patients) + 1L]] <- data.frame(
+        patient = p,
+        reason = "below_min_malignant_cells",
+        n_malignant = n_malig,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  if (length(dropped_patients) > 0L) {
+    dropped_patients <- do.call(rbind, dropped_patients)
+    message(
+      dataset_name, ": excluding ", nrow(dropped_patients),
+      " patient(s) with <= ", min_malignant_cells, " malignant cells (",
+      sum(dropped_patients$reason == "no_malignant_cells"), " with none, ",
+      sum(dropped_patients$reason == "below_min_malignant_cells"), " below threshold)"
+    )
+  } else {
+    dropped_patients <- data.frame(
+      patient = character(),
+      reason = character(),
+      n_malignant = integer(),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  message(
+    dataset_name, ": retained ", length(valid_patients),
+    " patient(s) with > ", min_malignant_cells, " ",
+    malignant_cell_type, " cells (", cell_type_column, ")"
+  )
+
+  keep_cells <- malig_cell_ids[pat_by_cell_all[malig_cell_ids] %in% valid_patients]
+  obj_malignant <- subset(x = obj, cells = keep_cells)
   malig_cells <- colnames(obj_malignant)
   meta_m <- obj_malignant@meta.data
-  meta_full <- obj@meta.data
 
   counts_mat <- get_assay_layer_or_slot(obj_malignant, layer = "counts", slot = "counts")
   data_mat <- get_assay_layer_or_slot(obj_malignant, layer = "data", slot = "data")
@@ -239,11 +328,7 @@ build_maligexpr_patient_matrix <- function(
 
   D <- data_mat[genes_keep, malig_cells, drop = FALSE]
   pat_by_cell <- setNames(as.character(meta_m[[patient_col]]), rownames(meta_m))
-  patients <- sort(unique(c(
-    as.character(meta_full[[patient_col]]),
-    as.character(pat_by_cell)
-  )))
-  patients <- patients[!is.na(patients) & patients != ""]
+  patients <- sort(valid_patients)
 
   mat <- matrix(
     NA_real_,
@@ -262,16 +347,15 @@ build_maligexpr_patient_matrix <- function(
   storage.mode(mat) <- "double"
 
   all_na_patients <- colnames(mat)[apply(is.na(mat), 2L, all)]
-  dropped_patients <- data.frame(
-    patient = character(),
-    reason = character(),
-    stringsAsFactors = FALSE
-  )
   if (length(all_na_patients) > 0L) {
-    dropped_patients <- data.frame(
-      patient = all_na_patients,
-      reason = "all_na_no_malignant_cells",
-      stringsAsFactors = FALSE
+    dropped_patients <- rbind(
+      dropped_patients,
+      data.frame(
+        patient = all_na_patients,
+        reason = "all_na_after_filter",
+        n_malignant = NA_integer_,
+        stringsAsFactors = FALSE
+      )
     )
     message(
       dataset_name, ": dropping ", length(all_na_patients),
@@ -333,7 +417,7 @@ write_dropped_patients_tsv <- function(dropped_patients, path) {
   )
 }
 
-normalize_pseudobulk_job <- function(job) {
+normalize_pseudobulk_job <- function(job, default_min_malignant_cells = MIN_MALIGNANT_CELLS) {
   required <- c(
     "seurat_path", "dataset_name", "patient_col",
     "cell_type_column", "malignant_cell_type"
@@ -342,7 +426,17 @@ normalize_pseudobulk_job <- function(job) {
   if (length(missing) > 0L) {
     stop("PSEUDOBULK_CONFIG entry missing field(s): ", paste(missing, collapse = ", "))
   }
-  job$malignant_cell_type <- as.character(job$malignant_cell_type)
+  if ("malignant_cell_types" %in% names(job)) {
+    stop(
+      "Use malignant_cell_type (single value), not malignant_cell_types. ",
+      "Allowed: ", paste(ALLOWED_MALIGNANT_CELL_TYPES, collapse = ", ")
+    )
+  }
+  job$malignant_cell_type <- validate_malignant_cell_type(job$malignant_cell_type)
+  if (is.null(job$min_malignant_cells)) {
+    job$min_malignant_cells <- default_min_malignant_cells
+  }
+  job$min_malignant_cells <- as.integer(job$min_malignant_cells)
   job
 }
 
@@ -353,6 +447,8 @@ run_pseudobulk_pipeline <- function(
     save_per_dataset_rds = SAVE_PER_DATASET_RDS,
     save_all_as_rdata = SAVE_ALL_AS_RDATA,
     min_detect_frac = MIN_DETECT_FRAC_IN_MALIGNANT,
+    min_malignant_cells = MIN_MALIGNANT_CELLS,
+    malignant_cell_type_override = NULL,
     force_include_genes = NULL,
     gene_list_path = NULL,
     include_panel = TRUE,
@@ -376,11 +472,16 @@ run_pseudobulk_pipeline <- function(
     }
     tryCatch(
       {
-        job <- normalize_pseudobulk_job(job)
+        job <- normalize_pseudobulk_job(job, default_min_malignant_cells = min_malignant_cells)
         job_include_panel <- if (!is.null(job$include_panel)) {
           isTRUE(job$include_panel)
         } else {
           include_panel
+        }
+        job_malig_type <- if (!is.null(malignant_cell_type_override)) {
+          validate_malignant_cell_type(malignant_cell_type_override, "malignant_cell_type_override")
+        } else {
+          job$malignant_cell_type
         }
         obj <- load_seurat_from_path(job$seurat_path)
         res <- build_maligexpr_patient_matrix(
@@ -388,7 +489,8 @@ run_pseudobulk_pipeline <- function(
           dataset_name = ds,
           patient_col = job$patient_col,
           cell_type_column = job$cell_type_column,
-          malignant_cell_type = job$malignant_cell_type,
+          malignant_cell_type = job_malig_type,
+          min_malignant_cells = job$min_malignant_cells,
           min_detect_frac = min_detect_frac,
           force_include_genes = force_include_genes,
           gene_list_path = gene_list_path,
@@ -431,6 +533,7 @@ run_pseudobulk_pipeline <- function(
           dropped <- data.frame(
             patient = character(),
             reason = character(),
+            n_malignant = integer(),
             stringsAsFactors = FALSE
           )
         }
@@ -468,16 +571,31 @@ parse_cli_and_run <- function() {
                 help = "Do not union scDiffCom gene panel (default: panel is included)"),
     make_option("--min_detect_frac", type = "double", default = MIN_DETECT_FRAC_IN_MALIGNANT,
                 help = "Detection fraction threshold for expressed genes [default %default]"),
+    make_option("--min_malignant_cells", type = "integer", default = MIN_MALIGNANT_CELLS,
+                help = "Keep patients with more than this many malignant cells [default %default]"),
+    make_option("--malignant_cell_type", type = "character", default = NULL,
+                help = paste0(
+                  "Malignant cell-type label (one of: ",
+                  paste(ALLOWED_MALIGNANT_CELL_TYPES, collapse = ", "),
+                  "); overrides config [optional]"
+                )),
     make_option("--out_dir", type = "character", default = OUT_DIR,
                 help = "Output directory [default %default]")
   )
   opt <- parse_args(OptionParser(option_list = option_list))
 
   include_panel <- !isTRUE(opt$no_include_panel)
+  malig_override <- if (!is.null(opt$malignant_cell_type) && nzchar(opt$malignant_cell_type)) {
+    validate_malignant_cell_type(opt$malignant_cell_type, "--malignant_cell_type")
+  } else {
+    NULL
+  }
 
   run_pseudobulk_pipeline(
     out_dir = path.expand(opt$out_dir),
     min_detect_frac = opt$min_detect_frac,
+    min_malignant_cells = opt$min_malignant_cells,
+    malignant_cell_type_override = malig_override,
     gene_list_path = opt$gene_list,
     include_panel = include_panel,
     dataset_name_filter = opt$dataset_name

@@ -13,4 +13,5 @@ if (!exists("PROJECT_SCRIPTS", inherits = FALSE)) {
   )
 }
 
-source(file.path(PREPROCESS_DIR, "rankGenesSplitUtils.R"), local = FALSE)
+source(file.path(PREPROCESS_DIR, "scDiffComGenePanel.R"), local = FALSE)
+source(file.path(PREPROCESS_DIR, "patientSplitUtils.R"), local = FALSE)

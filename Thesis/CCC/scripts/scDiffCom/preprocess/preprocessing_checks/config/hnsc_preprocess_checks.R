@@ -22,7 +22,7 @@ split_source_labels <- c(
 )
 
 PSEUDOBULK_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
-ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
+ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-Patient-ZScore")
 RANKGENES_DIR <- path.expand("~/CCC-PreProcess/results-RankGenes")
 RESIDUAL_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-Residual")
 

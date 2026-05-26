@@ -437,7 +437,7 @@ library(ggplot2)
 
 # For each dataset, calculate and plot the distribution of HIGH/MID/LOW calls per patient
 # across all analyzed genes.
-BASE_RESULTS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
+BASE_RESULTS_DIR <- path.expand("~/CCC-PreProcess/results-Patient-ZScore")
 
 
 dataset_names <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
@@ -561,7 +561,7 @@ library(ggplot2)
 SPLIT_SOURCE <- "both"   # "patient_zscore" | "rankgenes" | "residual" | "both" | "all"
 DATASETS <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
 PSEUDOBULK_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
-ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
+ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-Patient-ZScore")
 RANKGENES_DIR <- path.expand("~/CCC-PreProcess/results-RankGenes")
 RESIDUAL_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-Residual")
 QC_OUT_DIR <- path.expand("~/Thesis/CCC/outputs/plots/QC/gene_dispersion")
@@ -582,7 +582,7 @@ split_source_labels <- c(
   residual = "Residual tertiles (PC-regressed pseudobulk)"
 )
 
-# ── Shared helpers (rankGenesSplitUtils.R) ────────────────────────────────────
+# ── Shared helpers (patientSplitUtils.R) ────────────────────────────────────
 script_dir <- tryCatch(
   dirname(knitr::current_input(dir = TRUE)),
   error = function(e) NULL
@@ -590,7 +590,7 @@ script_dir <- tryCatch(
 if (is.null(script_dir) || !nzchar(script_dir)) {
   script_dir <- normalizePath(".", winslash = "/")
 }
-source(file.path(script_dir, "rankGenesSplitUtils.R"))
+source(file.path(script_dir, "patientSplitUtils.R"))
 
 LABEL_NUM <- c(LOW = 1, MID = 2, HIGH = 3)
 
@@ -881,7 +881,7 @@ library(patchwork)
 SPLIT_SOURCE <- "both"
 DATASETS <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
 PSEUDOBULK_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
-ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
+ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-Patient-ZScore")
 RANKGENES_DIR <- path.expand("~/CCC-PreProcess/results-RankGenes")
 RESIDUAL_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-Residual")
 PROFILE_PCA_DIR <- path.expand("~/Thesis/CCC/outputs/plots/QC/gene_profile_pca")
@@ -914,7 +914,7 @@ script_dir <- tryCatch(
 if (is.null(script_dir) || !nzchar(script_dir)) {
   script_dir <- normalizePath(".", winslash = "/")
 }
-source(file.path(script_dir, "rankGenesSplitUtils.R"))
+source(file.path(script_dir, "patientSplitUtils.R"))
 
 LABEL_NUM <- c(LOW = 1, MID = 2, HIGH = 3)
 

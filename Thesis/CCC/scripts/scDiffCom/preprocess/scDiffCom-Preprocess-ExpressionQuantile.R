@@ -1,18 +1,11 @@
 #!/usr/bin/env Rscript
 
-# Residual-based patient splits from pseudobulk matrices (PC-regressed expression).
+# Expression quantile splits from pseudobulk (same rule as scDiffComPreprocess.R).
 #
 # Run order:
 #   1. Rscript createPseudobulkMatrix.R
-#   2. Rscript scDiffCom-Preprocess-Residual.R --dataset_name Kurten_HNSC --n_pc 2
-#
-# PCA uses patients with complete pseudobulk across all genes (prcomp on t(mat),
-# scale.=TRUE). Per-gene residuals regress expression on PC1..PCn; tertiles are
-# rank-based (top third = HIGH, bottom third = LOW).
-#
-# R libs (if optparse missing from plain Rscript):
-#   export R_LIBS_SITE=/gpfs0/bgu-ofircohen/group/R_packages/R_4.5.0
-#   or source groupRprofile in ~/.Rprofile
+#   2. Rscript scDiffCom-Preprocess-ExpressionQuantile.R --dataset_name Kurten_HNSC
+#   3. Rscript compareExpressionSplitEquivalence.R --dataset_name Kurten_HNSC
 
 suppressPackageStartupMessages({
   library(optparse)
@@ -40,11 +33,13 @@ option_list <- list(
               ),
               metavar = "character"),
   make_option("--output_base", type = "character",
-              default = "~/CCC-PreProcess/results-Residual",
+              default = "~/CCC-PreProcess/results-ExpressionQuantile",
               help = "Base output directory [default %default]",
               metavar = "character"),
-  make_option("--n_pc", type = "integer", default = 2L,
-              help = "Number of patient PCs to regress out (1 or 2) [default %default]"),
+  make_option("--low_q", type = "double", default = 1/3,
+              help = "Lower quantile for LOW group [default %default]"),
+  make_option("--high_q", type = "double", default = 2/3,
+              help = "Upper quantile for HIGH group [default %default]"),
   make_option("--overwrite", action = "store_true", default = FALSE,
               help = "Overwrite existing per-gene .rds files [default %default]"),
   make_option("--gene_list", type = "character", default = NULL,
@@ -57,10 +52,8 @@ opt <- optparse::parse_args(optparse::OptionParser(option_list = option_list))
 if (is.null(opt$dataset_name) || opt$dataset_name == "") {
   stop("Error: --dataset_name is required.")
 }
-
-n_pc <- as.integer(opt$n_pc)
-if (!n_pc %in% c(1L, 2L)) {
-  stop("Error: --n_pc must be 1 or 2. Got: ", n_pc)
+if (opt$low_q >= opt$high_q) {
+  stop("Error: --low_q must be strictly less than --high_q.")
 }
 
 input_dir <- path.expand(opt$input_dir)
@@ -83,18 +76,19 @@ mat <- load_gene_patient_matrix(in_path)
 patients <- colnames(mat)
 genes <- rownames(mat)
 
-message("Computing patient PCs (n_pc=", n_pc, ") and per-gene residuals ...")
-res <- build_residual_splits_matrix(mat, n_pc = n_pc)
-splits_df <- res$splits
-resid_mat <- res$residuals
+message(
+  "Building expression quantile splits (low_q=", opt$low_q,
+  ", high_q=", opt$high_q, ") ..."
+)
+splits_df <- build_expression_quantile_splits_matrix(
+  mat,
+  low_q = opt$low_q,
+  high_q = opt$high_q
+)
 
 splits_path <- file.path(out_dir, paste0(opt$dataset_name, ALL_SPLITS_SUFFIX))
 saveRDS(splits_df, splits_path)
 message("Saved all patient splits: ", splits_path)
-
-resid_path <- file.path(out_dir, paste0(opt$dataset_name, RESIDUAL_MATRIX_SUFFIX))
-saveRDS(resid_mat, resid_path)
-message("Saved residual matrix: ", resid_path)
 
 write_one_gene <- function(i) {
   gene <- genes[[i]]
