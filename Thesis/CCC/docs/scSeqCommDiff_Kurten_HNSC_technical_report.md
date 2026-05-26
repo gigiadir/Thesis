@@ -1,7 +1,7 @@
 # scSeqCommDiff on Kurten_HNSC: Technical Report
 
 **Audience:** Bioinformatics and data engineering  
-**Pipeline script:** [`Thesis/CCC/scripts/run_scSeqCommDiff_Kurten_HNSC.R`](../scripts/run_scSeqCommDiff_Kurten_HNSC.R)  
+**Pipeline script:** [`Thesis/CCC/scripts/scDiffCom/pipeline/run_scSeqCommDiff_Kurten_HNSC.R`](../scripts/scDiffCom/pipeline/run_scSeqCommDiff_Kurten_HNSC.R)  
 **Default outputs:** `Thesis/CCC/outputs/scSeqCommDiff/Kurten_HNSC/`  
 **Scope:** Proof-of-concept (single `Rscript` run; no batch/`qsub` wrapper)
 
@@ -68,7 +68,7 @@ Kurten_HNSC has **5 HIGH and 5 LOW** patients after excluding `MID` and unannota
 
 ### 1.5 Comparison to scDiffCom (project context)
 
-Your existing [`scDiffComPipeline.R`](../scripts/scDiffComPipeline.R) performs permutation-based differential CCI with explicit `seurat_condition_id` and patient-aware structure. scSeqCommDiff differs in:
+Your existing [`scDiffComPipeline.R`](../scripts/scDiffCom/pipeline/scDiffComPipeline.R) performs permutation-based differential CCI with explicit `seurat_condition_id` and patient-aware structure. scSeqCommDiff differs in:
 
 - Joint **inter + intra** modeling in one `differential_comm` table
 - Built-in TRN/pathway intracellular layer (not only L-R logFC)
@@ -186,7 +186,7 @@ Only interactions where **`Tumor` is sender or receiver** are interpreted in dow
 | **Tumor → X** | `Tumor → Fibroblast`, AXL–? | Tumor-secreted ligand; receiver stroma/immune response |
 | **Excluded** | `CD8T → Macrophage` | Dropped from `differential_comm_Tumor_involved.tsv` |
 
-This mirrors the malignant-focused filter in [`scDiffCom-PostAnalysis.Rmd`](../scripts/scDiffCom-PostAnalysis.Rmd) (`EMITTER_CELLTYPE` / `RECEIVER_CELLTYPE` ∈ Tumor).
+This mirrors the malignant-focused filter in [scDiffCom post-analysis](../scripts/scDiffCom/post_analysis/README.md) (`EMITTER_CELLTYPE` / `RECEIVER_CELLTYPE` ∈ Tumor; entry point `index.Rmd` or wrapper `scDiffCom-PostAnalysis.Rmd`).
 
 ### 3.3 What the AXL filter yields (within Tumor subset)
 
@@ -220,10 +220,10 @@ Rscript -e 'devtools::install_gitlab("sysbiobig/scseqcomm")'
 Rscript -e 'cat(find.package("scSeqComm"), "\n")'
 
 # Full run (memory-intensive; use subset_genes or bigmatrix if needed)
-Rscript Thesis/CCC/scripts/run_scSeqCommDiff_Kurten_HNSC.R --n_cores 4
+Rscript Thesis/CCC/scripts/scDiffCom/pipeline/run_scSeqCommDiff_Kurten_HNSC.R --n_cores 4
 
 # Re-post-process existing RDS
-Rscript Thesis/CCC/scripts/run_scSeqCommDiff_Kurten_HNSC.R --skip_run
+Rscript Thesis/CCC/scripts/scDiffCom/pipeline/run_scSeqCommDiff_Kurten_HNSC.R --skip_run
 ```
 
 Optional CClens (separate install):

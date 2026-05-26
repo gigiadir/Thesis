@@ -5,8 +5,9 @@ devtools::install_github("DKFZ-E220/HNSCatlas")
 library(scDiffCom)
 library(Seurat)
 library(dplyr)
-# source("~/Thesis/CCC/scripts/utils/my.utils.R")
-source("~/Thesis/CCC/scripts/utils/Utils.R")
+SCRIPT_ROOT <- normalizePath("../../", winslash = "/")
+# source(file.path(SCRIPT_ROOT, "utils/my.utils.R"))
+source(file.path(SCRIPT_ROOT, "utils/Utils.R"))
 DROPBOX_DIR_PATH <- file.path("/local/ofir/OCohenLab/Dropbox")
 
 LOCAL_DROPBOX_DIR_PATH = file.path("~/Dropbox")
@@ -590,8 +591,8 @@ my.save.RData("Complexes.Oncogenes.OncoKB", "~/Thesis/CCC/outputs/data")
 # After Mass Run - Try to combine results for ILANIT
 ## Analysis Globals & Helpers
 ```{r}
-source("~/Thesis/CCC/scripts/utils/Utils.R")
-source("~/Thesis/CCC/scripts/utils/my.utils.R")
+source(file.path(SCRIPT_ROOT, "utils/Utils.R"))
+source(file.path(SCRIPT_ROOT, "utils/my.utils.R"))
 
 library(RColorBrewer)
 library(pheatmap)

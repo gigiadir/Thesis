@@ -1,0 +1,128 @@
+# Gene-of-interest cross-cohort heatmap (4 H&N datasets)
+
+```{r goi-cross-cohort-jaccard}
+OUTPUT_DIR <- "~/Thesis/CCC/outputs/scDiffCom/plots/v3"
+GENE_OF_INT <- "AXL"
+goi_result        <- build_gene_dataset_jaccard(GENE_OF_INT, all_top_cci_sets)
+goi_jaccard_mat   <- goi_result$dist_mat
+goi_intersections <- goi_result$intersections   # list-matrix: [i,j] → shared CCI strings
+
+message(sprintf("\n%s — Jaccard distance matrix (top %d CCIs by |LOGFC|):",
+                GENE_OF_INT, TOP_N_CCI))
+print(round(goi_jaccard_mat, 3))
+
+# NA cells arise when a gene is absent in a dataset; display as "N/A", colour as 1.
+# Diagonal is NA (self-distance undefined); off-diagonal NAs → 1 for colour scale.
+goi_display_mat <- goi_jaccard_mat
+goi_display_mat[is.na(goi_display_mat) & row(goi_display_mat) != col(goi_display_mat)] <- 1
+
+goi_clust_mat <- goi_jaccard_mat
+goi_clust_mat[is.na(goi_clust_mat)] <- 1
+diag(goi_clust_mat) <- 0
+
+cell_annot <- matrix(
+  ifelse(row(goi_jaccard_mat) == col(goi_jaccard_mat), "",
+         ifelse(is.na(goi_jaccard_mat), "N/A", sprintf("%.3f", goi_jaccard_mat))),
+  nrow = nrow(goi_jaccard_mat),
+  dimnames = dimnames(goi_jaccard_mat)
+)
+
+goi_heatmap_file <- file.path(OUTPUT_DIR, paste0(GENE_OF_INT, "_jaccard_umap.png"))
+png(goi_heatmap_file, width = 5000, height = 3000, res = 300)
+
+# Dynamic color bounds for the plotted matrix
+goi_min_val <- min(goi_display_mat, na.rm = TRUE)
+goi_max_val <- max(goi_display_mat, na.rm = TRUE)
+goi_breaks  <- seq(goi_min_val, goi_max_val, length.out = 101)
+goi_leg_breaks <- pretty(c(goi_min_val, goi_max_val), n = 5)
+goi_leg_breaks <- goi_leg_breaks[goi_leg_breaks >= goi_min_val & goi_leg_breaks <= goi_max_val]
+goi_leg_labels <- format(round(goi_leg_breaks, 3), trim = TRUE)
+
+pheatmap(
+  goi_display_mat,
+  color             = colorRampPalette(c("#4575b4", "#ffffbf", "#d73027"))(100),
+  breaks            = goi_breaks,
+  na_col            = "grey80",
+  cluster_rows      = TRUE,
+  cluster_cols      = TRUE,
+  clustering_distance_rows = as.dist(goi_clust_mat),
+  clustering_distance_cols = as.dist(goi_clust_mat),
+  display_numbers   = cell_annot,
+  number_color      = "black",
+  fontsize_number   = 10,
+  fontsize_row      = 10,
+  fontsize_col      = 10,
+  angle_col         = "45",
+  main              = sprintf(
+    "%s — Jaccard Distance across H&N Datasets\n(top %d CCIs by |LOGFC|)",
+    GENE_OF_INT, TOP_N_CCI
+  ),
+  legend_breaks     = goi_leg_breaks,
+  legend_labels     = goi_leg_labels
+)
+
+dev.off()
+# Expose for inspection
+matrix_goi_jaccard   <- goi_jaccard_mat    # numeric distance matrix
+matrix_goi_intersect <- goi_intersections  # list-matrix of shared CCI strings
+
+# View(as.data.frame(matrix_goi_jaccard))
+# goi_intersections[["Bassez2021_Breast_step4", "Chan2021_Lung_step4"]]  # example lookup
+
+# ── AO: 6×6 distance heatmap for the same gene (full ranked lists) ────────────
+message(sprintf("\n%s — Average Overlap distance matrix (full ranked CCI lists):",
+                GENE_OF_INT))
+goi_ao_mat <- build_gene_dataset_ao(GENE_OF_INT, all_cci_sets_ranked)
+print(round(goi_ao_mat, 3))
+
+goi_ao_display_mat <- goi_ao_mat
+goi_ao_display_mat[is.na(goi_ao_display_mat) & row(goi_ao_display_mat) != col(goi_ao_display_mat)] <- 1
+
+goi_ao_clust_mat <- goi_ao_mat
+goi_ao_clust_mat[is.na(goi_ao_clust_mat)] <- 1
+diag(goi_ao_clust_mat) <- 0
+
+ao_cell_annot <- matrix(
+  ifelse(row(goi_ao_mat) == col(goi_ao_mat), "",
+         ifelse(is.na(goi_ao_mat), "N/A", sprintf("%.3f", goi_ao_mat))),
+  nrow = nrow(goi_ao_mat),
+  dimnames = dimnames(goi_ao_mat)
+)
+
+goi_ao_heatmap_file <- file.path(OUTPUT_DIR, paste0(GENE_OF_INT, "_ao_heatmap.png"))
+png(goi_ao_heatmap_file, width = 5000, height = 3000, res = 300)
+
+# Dynamic color bounds for the plotted matrix
+goi_ao_min_val <- min(goi_ao_display_mat, na.rm = TRUE)
+goi_ao_max_val <- max(goi_ao_display_mat, na.rm = TRUE)
+goi_ao_breaks  <- seq(goi_ao_min_val, goi_ao_max_val, length.out = 101)
+goi_ao_leg_breaks <- pretty(c(goi_ao_min_val, goi_ao_max_val), n = 5)
+goi_ao_leg_breaks <- goi_ao_leg_breaks[goi_ao_leg_breaks >= goi_ao_min_val & goi_ao_leg_breaks <= goi_ao_max_val]
+goi_ao_leg_labels <- format(round(goi_ao_leg_breaks, 3), trim = TRUE)
+
+pheatmap(
+  goi_ao_display_mat,
+  color             = colorRampPalette(c("#4575b4", "#ffffbf", "#d73027"))(100),
+  breaks            = goi_ao_breaks,
+  na_col            = "grey80",
+  cluster_rows      = TRUE,
+  cluster_cols      = TRUE,
+  clustering_distance_rows = as.dist(goi_ao_clust_mat),
+  clustering_distance_cols = as.dist(goi_ao_clust_mat),
+  display_numbers   = ao_cell_annot,
+  number_color      = "black",
+  fontsize_number   = 10,
+  fontsize_row      = 10,
+  fontsize_col      = 10,
+  angle_col         = "45",
+  main              = sprintf(
+    "%s — Average Overlap Distance across H&N Datasets\n(full ranked CCIs by |LOGFC|)",
+    GENE_OF_INT
+  ),
+  legend_breaks     = goi_ao_leg_breaks,
+  legend_labels     = goi_ao_leg_labels
+)
+dev.off()
+
+matrix_goi_ao <- goi_ao_mat
+```

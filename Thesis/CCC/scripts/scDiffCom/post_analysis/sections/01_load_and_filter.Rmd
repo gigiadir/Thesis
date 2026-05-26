@@ -1,0 +1,96 @@
+# Load and filter (H&N)
+
+```{r load-data}
+# ── Head & Neck (HNSC) ────────────────────────────────────────────────────────
+Kurten_HNSC.scDiffComs <- load.dataset.scDiffComs("Kurten_HNSC")
+Puram_HNSC.scDiffComs  <- load.dataset.scDiffComs("Puram_HNSC")
+Choi_HNSC.scDiffComs   <- load.dataset.scDiffComs("Choi_HNSC")
+Bill_HNSC.scDiffComs   <- load.dataset.scDiffComs("Bill_HNSC")
+
+Kurten_HNSC.malignant <- lapply(
+  Kurten_HNSC.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.malignant
+)
+Puram_HNSC.malignant <- lapply(
+  Puram_HNSC.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.malignant
+)
+Choi_HNSC.malignant <- lapply(
+  Choi_HNSC.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.malignant
+)
+Bill_HNSC.malignant <- lapply(
+  Bill_HNSC.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.malignant
+)
+
+# my.save.RData("Kurten_HNSC.malignant", "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+# my.save.RData("Puram_HNSC.malignant",  "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+# my.save.RData("Choi_HNSC.malignant",   "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+# my.save.RData("Bill_HNSC.malignant",   "~/Thesis/CCC/outputs/scDiffCom/RData_objects")
+```
+
+## Filter unknown cell types and shared genes
+
+```{r filter-unknown-celltypes}
+# Remove interactions where EMITTER or RECEIVER cell type matches "unknown", "other",
+# or "equivocal" (case-insensitive). Original .malignant lists are preserved with
+# an .orig suffix so the unfiltered data remain accessible in the session.
+
+is_unknown_celltype <- function(ct) {
+  grepl("unknown|other|equivocal", ct, ignore.case = TRUE)
+}
+
+filter_unknown_celltypes <- function(cci_df) {
+  cci_df %>%
+    filter(
+      !is_unknown_celltype(EMITTER_CELLTYPE),
+      !is_unknown_celltype(RECEIVER_CELLTYPE)
+    )
+}
+
+Kurten_HNSC.malignant.orig <- Kurten_HNSC.malignant
+Puram_HNSC.malignant.orig  <- Puram_HNSC.malignant
+Choi_HNSC.malignant.orig   <- Choi_HNSC.malignant
+Bill_HNSC.malignant.orig   <- Bill_HNSC.malignant
+
+Kurten_HNSC.malignant <- lapply(Kurten_HNSC.malignant.orig, filter_unknown_celltypes)
+Puram_HNSC.malignant  <- lapply(Puram_HNSC.malignant.orig,  filter_unknown_celltypes)
+Choi_HNSC.malignant   <- lapply(Choi_HNSC.malignant.orig,   filter_unknown_celltypes)
+Bill_HNSC.malignant   <- lapply(Bill_HNSC.malignant.orig,   filter_unknown_celltypes)
+
+Common.HN.Malignant.Genes <- Reduce(intersect, list(
+  names(Kurten_HNSC.malignant),
+  names(Puram_HNSC.malignant),
+  names(Choi_HNSC.malignant),
+  names(Bill_HNSC.malignant)
+))
+
+TOP_N_FILTER_GENES <- 100
+
+Original.Genes.List <- unique(c(
+  c("CDH1", "CDH2", "CDH11", "CTNNB1", "VWF", "COL1A1", "COL1A2", "VEGFA", "IGF1", "IGF2", "CSF1", "CSF1R"),
+  c("AXL", "ERBB2", "EGFR", "HLA-A", "HLA-B", "HLA-C", "ESR1", "MKI67", "GATA3", "CTLA4")
+))
+
+Top.N.HN.Genes <- Common.HN.Malignant.Genes
+
+message("H&N shared gene filter: ", length(Top.N.HN.Genes),
+        " genes (intersection across all H&N datasets).")
+
+Kurten_HNSC.malignant <- Kurten_HNSC.malignant[Top.N.HN.Genes]
+Puram_HNSC.malignant  <- Puram_HNSC.malignant[Top.N.HN.Genes]
+Choi_HNSC.malignant   <- Choi_HNSC.malignant[Top.N.HN.Genes]
+Bill_HNSC.malignant   <- Bill_HNSC.malignant[Top.N.HN.Genes]
+
+report_filter <- function(orig, filt, label) {
+  n_orig <- sum(sapply(orig, nrow))
+  n_filt <- sum(sapply(filt, nrow))
+  message(sprintf("  %-35s  %d → %d rows (removed %d)", label, n_orig, n_filt, n_orig - n_filt))
+}
+message("Unknown-celltype filter applied:")
+report_filter(Kurten_HNSC.malignant.orig, Kurten_HNSC.malignant, "Kurten_HNSC")
+report_filter(Puram_HNSC.malignant.orig,  Puram_HNSC.malignant,  "Puram_HNSC")
+report_filter(Choi_HNSC.malignant.orig,   Choi_HNSC.malignant,   "Choi_HNSC")
+report_filter(Bill_HNSC.malignant.orig,   Bill_HNSC.malignant,   "Bill_HNSC")
+```

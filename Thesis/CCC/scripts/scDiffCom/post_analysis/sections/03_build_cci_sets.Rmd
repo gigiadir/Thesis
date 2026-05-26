@@ -1,0 +1,111 @@
+# Build CCI sets
+
+```{r cci-config}
+# ── GLOBAL CONFIG ─────────────────────────────────────────────────────────────
+TOP_N_CCI    <- 500
+GENE_OF_INT  <- "AXL"
+SEED         <- 42
+# DATASET_LABELS, ds_short_map, ds_cancer_map, source_colors: config/hnsc_datasets.R
+```
+
+```{r cci-build-sets}
+# ── BUILD PER-DATASET CCI SETS ────────────────────────────────────────────────
+# Bassez_top_cci_sets   <- build_gene_cci_sets(Bassez2021_Breast_step4.malignant,   top_n = TOP_N_CCI)
+# Qian_top_cci_sets     <- build_gene_cci_sets(Qian2020_Breast_step4.malignant,     top_n = TOP_N_CCI)
+# Wu_top_cci_sets       <- build_gene_cci_sets(Wu2021_Breast_step4.malignant,       top_n = TOP_N_CCI)
+# Chan_top_cci_sets     <- build_gene_cci_sets(Chan2021_Lung_step4.malignant,       top_n = TOP_N_CCI)
+# Laughney_top_cci_sets <- build_gene_cci_sets(Laughney2020_Lung_step4.malignant,   top_n = TOP_N_CCI)
+# Xing_top_cci_sets     <- build_gene_cci_sets(Xing2021_Lung_step4.malignant,       top_n = TOP_N_CCI)
+Kurten_top_cci_sets   <- build_gene_cci_sets(Kurten_HNSC.malignant,               top_n = TOP_N_CCI)
+Puram_top_cci_sets    <- build_gene_cci_sets(Puram_HNSC.malignant,                top_n = TOP_N_CCI)
+Choi_top_cci_sets     <- build_gene_cci_sets(Choi_HNSC.malignant,                 top_n = TOP_N_CCI)
+Bill_top_cci_sets     <- build_gene_cci_sets(Bill_HNSC.malignant,                 top_n = TOP_N_CCI)
+
+# message("Genes in Bassez:   ", length(Bassez_top_cci_sets))
+# message("Genes in Qian:     ", length(Qian_top_cci_sets))
+# message("Genes in Wu:       ", length(Wu_top_cci_sets))
+# message("Genes in Chan:     ", length(Chan_top_cci_sets))
+# message("Genes in Laughney: ", length(Laughney_top_cci_sets))
+# message("Genes in Xing:     ", length(Xing_top_cci_sets))
+message("Genes in Kurten:   ", length(Kurten_top_cci_sets))
+message("Genes in Puram:    ", length(Puram_top_cci_sets))
+message("Genes in Choi:     ", length(Choi_top_cci_sets))
+message("Genes in Bill:     ", length(Bill_top_cci_sets))
+
+# ── COMBINED CCI SET LIST (used by all downstream chunks) ─────────────────────
+all_top_cci_sets <- list(
+  # Bassez2021_Breast_step4   = Bassez_top_cci_sets,
+  # Qian2020_Breast_step4     = Qian_top_cci_sets,
+  # Wu2021_Breast_step4       = Wu_top_cci_sets,
+  # Chan2021_Lung_step4       = Chan_top_cci_sets,
+  # Laughney2020_Lung_step4   = Laughney_top_cci_sets,
+  # Xing2021_Lung_step4       = Xing_top_cci_sets,
+  Kurten_HNSC               = Kurten_top_cci_sets,
+  Puram_HNSC                = Puram_top_cci_sets,
+  Choi_HNSC                 = Choi_top_cci_sets,
+  Bill_HNSC                 = Bill_top_cci_sets
+)
+
+# ── RANKED CCI SETS (full list, no truncation — used by Average Overlap) ─────
+# Bassez_cci_sets_ranked   <- build_gene_cci_sets(Bassez2021_Breast_step4.malignant,   top_n = NULL)
+# Qian_cci_sets_ranked     <- build_gene_cci_sets(Qian2020_Breast_step4.malignant,     top_n = NULL)
+# Wu_cci_sets_ranked       <- build_gene_cci_sets(Wu2021_Breast_step4.malignant,       top_n = NULL)
+# Chan_cci_sets_ranked     <- build_gene_cci_sets(Chan2021_Lung_step4.malignant,       top_n = NULL)
+# Laughney_cci_sets_ranked <- build_gene_cci_sets(Laughney2020_Lung_step4.malignant,   top_n = NULL)
+# Xing_cci_sets_ranked     <- build_gene_cci_sets(Xing2021_Lung_step4.malignant,       top_n = NULL)
+Kurten_cci_sets_ranked   <- build_gene_cci_sets(Kurten_HNSC.malignant,               top_n = NULL)
+Puram_cci_sets_ranked    <- build_gene_cci_sets(Puram_HNSC.malignant,                top_n = NULL)
+Choi_cci_sets_ranked     <- build_gene_cci_sets(Choi_HNSC.malignant,                 top_n = NULL)
+Bill_cci_sets_ranked     <- build_gene_cci_sets(Bill_HNSC.malignant,                 top_n = NULL)
+
+all_cci_sets_ranked <- list(
+  Kurten_HNSC = Kurten_cci_sets_ranked,
+  Puram_HNSC  = Puram_cci_sets_ranked,
+  Choi_HNSC   = Choi_cci_sets_ranked,
+  Bill_HNSC   = Bill_cci_sets_ranked
+)
+
+# ── GENE-CCI INSPECTION TABLE ─────────────────────────────────────────────────
+# One tidy data frame per dataset: Gene | n_CCIs | CCI (one row per gene-CCI pair).
+# Usage: View(gene_cci_top500_summary$Bassez2021_Breast_step4)
+
+gene_cci_top500_summary <- purrr::imap(all_top_cci_sets, function(ds_sets, ds_name) {
+  
+  # Step 1: Create the un-arranged data frame
+  df <- purrr::imap_dfr(ds_sets, function(cci_vec, gene) {
+    if (length(cci_vec) == 0) return(NULL)
+    
+    data.frame(
+      Gene = gene, 
+      n_CCIs = length(cci_vec), 
+      CCI = cci_vec,
+      stringsAsFactors = FALSE
+    )
+  })
+  
+  # Step 2: Check if the resulting data frame is empty
+  # If it is, return an empty data frame with the correct columns to prevent errors
+  if (nrow(df) == 0 || !("Gene" %in% names(df))) {
+    return(data.frame(
+      Gene = character(), 
+      n_CCIs = integer(), 
+      CCI = character(), 
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Step 3: If not empty, arrange and return
+  df %>% arrange(.data$Gene, .data$CCI)
+})
+
+message("gene_cci_top500_summary ready — datasets: ",
+        paste(names(gene_cci_top500_summary), collapse = ", "))
+
+# ── Quick inspection (uncomment to run interactively) ─────────────────────────
+# View(gene_cci_top500_summary$Bassez2021_Breast_step4)
+# View(gene_cci_top500_summary$Qian2020_Breast_step4)
+# View(gene_cci_top500_summary$Wu2021_Breast_step4)
+# View(gene_cci_top500_summary$Chan2021_Lung_step4)
+# View(gene_cci_top500_summary$Laughney2020_Lung_step4)
+# View(gene_cci_top500_summary$Xing2021_Lung_step4)
+```

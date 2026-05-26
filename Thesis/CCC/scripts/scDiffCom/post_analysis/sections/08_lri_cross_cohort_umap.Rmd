@@ -1,0 +1,154 @@
+# Gene x Dataset UMAP — LRI logFC
+
+```{r gene-dataset-lri-umap}
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+K_LRI_UMAP  <- 15
+MINDIST_LRI <- 0.1
+
+LRI_UMAP_CANCER_FILTER_OPTIONS <- c("H&N") # c("All", "Breast", "Lung", "H&N")
+for (LRI_UMAP_CANCER_FILTER in LRI_UMAP_CANCER_FILTER_OPTIONS) {
+message("\n===== LRI_UMAP_CANCER_FILTER: ", LRI_UMAP_CANCER_FILTER, " =====")
+
+# Full catalogue — filter is applied below
+.lri_all_datasets <- list(
+  # Bassez2021_Breast_step4  = Bassez2021_Breast_step4.malignant,
+  # Qian2020_Breast_step4    = Qian2020_Breast_step4.malignant,
+  # Wu2021_Breast_step4      = Wu2021_Breast_step4.malignant,
+  # Chan2021_Lung_step4      = Chan2021_Lung_step4.malignant,
+  # Laughney2020_Lung_step4  = Laughney2020_Lung_step4.malignant,
+  # Xing2021_Lung_step4      = Xing2021_Lung_step4.malignant,
+  Kurten_HNSC              = Kurten_HNSC.malignant,
+  Puram_HNSC               = Puram_HNSC.malignant,
+  Choi_HNSC                = Choi_HNSC.malignant,
+  Bill_HNSC                = Bill_HNSC.malignant
+)
+.lri_all_cancer <- c(
+  # Bassez2021_Breast_step4  = "Breast",
+  # Qian2020_Breast_step4    = "Breast",
+  # Wu2021_Breast_step4      = "Breast",
+  # Chan2021_Lung_step4      = "Lung",
+  # Laughney2020_Lung_step4  = "Lung",
+  # Xing2021_Lung_step4      = "Lung",
+  Kurten_HNSC              = "H&N",
+  Puram_HNSC               = "H&N",
+  Choi_HNSC                = "H&N",
+  Bill_HNSC                = "H&N"
+)
+.lri_all_colors <- c(
+  # Bassez2021_Breast_step4  = "#E41A1C",
+  # Qian2020_Breast_step4    = "#FF7F00",
+  # Wu2021_Breast_step4      = "#4DAF4A",
+  # Chan2021_Lung_step4      = "#377EB8",
+  # Laughney2020_Lung_step4  = "#984EA3",
+  # Xing2021_Lung_step4      = "#A65628",
+  Kurten_HNSC              = "#F781BF",
+  Puram_HNSC               = "#999999",
+  Choi_HNSC                = "#66C2A5",
+  Bill_HNSC                = "#FC8D62"
+)
+
+# Apply filter
+if (!LRI_UMAP_CANCER_FILTER %in% c("All", "Breast", "Lung", "H&N"))
+  stop("LRI_UMAP_CANCER_FILTER must be one of: \"All\", \"Breast\", \"Lung\", \"H&N\"")
+{
+  keep_ds <- if (LRI_UMAP_CANCER_FILTER == "All") names(.lri_all_datasets) else
+               names(.lri_all_datasets)[.lri_all_cancer[names(.lri_all_datasets)] == LRI_UMAP_CANCER_FILTER]
+  LRI_UMAP_DATASETS <- .lri_all_datasets[keep_ds]
+  LRI_UMAP_CANCER   <- .lri_all_cancer[keep_ds]
+  LRI_UMAP_COLORS   <- .lri_all_colors[keep_ds]
+}
+message("LRI UMAP datasets (", LRI_UMAP_CANCER_FILTER, "): ", paste(names(LRI_UMAP_DATASETS), collapse = ", "))
+
+# ── 1. Build per-dataset LRI × Gene LogFC matrices ───────────────────────────
+lri_mats <- lapply(LRI_UMAP_DATASETS, build_lri_logfc_mat)
+
+# ── 2. Union LRI space ────────────────────────────────────────────────────────
+all_lris <- sort(unique(unlist(lapply(lri_mats, rownames))))
+message("Union LRI space: ", length(all_lris), " LRIs")
+
+# ── 3. Build Gene × Dataset feature matrix (rows = Gene_Dataset, cols = LRIs) ─
+gd_rows <- purrr::imap(lri_mats, function(mat, ds) {
+  # mat is LRI × Gene — transpose to Gene × LRI, then align to union LRI space
+  gene_names <- colnames(mat)
+  lapply(gene_names, function(g) {
+    vec <- setNames(rep(NA_real_, length(all_lris)), all_lris)
+    present <- rownames(mat)[!is.na(mat[, g])]
+    vec[present] <- mat[present, g]
+    list(label   = paste0(g, "_", ds),
+         gene    = g,
+         dataset = ds,
+         cancer  = LRI_UMAP_CANCER[[ds]],
+         vec     = vec)
+  })
+}) %>% purrr::flatten()
+
+# Remove rows that are entirely NA (gene absent in that dataset)
+non_empty_gd <- sapply(gd_rows, function(x) any(!is.na(x$vec)))
+gd_rows      <- gd_rows[non_empty_gd]
+message("Gene × Dataset points (non-empty): ", length(gd_rows))
+
+labels_gd_lri  <- sapply(gd_rows, `[[`, "label")
+genes_gd_lri   <- sapply(gd_rows, `[[`, "gene")
+datasets_gd_lri <- sapply(gd_rows, `[[`, "dataset")
+cancer_gd_lri  <- sapply(gd_rows, `[[`, "cancer")
+
+# ── 4. Impute NAs with 0 for UMAP input ───────────────────────────────────────
+feat_mat <- do.call(rbind, lapply(gd_rows, `[[`, "vec"))
+rownames(feat_mat) <- labels_gd_lri
+feat_mat[is.na(feat_mat)] <- 0
+message("Feature matrix: ", nrow(feat_mat), " rows × ", ncol(feat_mat), " LRI columns")
+
+# ── 5. UMAP ───────────────────────────────────────────────────────────────────
+set.seed(SEED)
+k_eff_lri   <- min(K_LRI_UMAP, nrow(feat_mat) - 1)
+umap_lri    <- uwot::umap(feat_mat,
+                           n_neighbors = k_eff_lri,
+                           min_dist    = MINDIST_LRI,
+                           metric      = "cosine")
+
+umap_lri_df <- data.frame(
+  UMAP1   = umap_lri[, 1],
+  UMAP2   = umap_lri[, 2],
+  Label   = labels_gd_lri,
+  Gene    = genes_gd_lri,
+  Dataset = datasets_gd_lri,
+  Cancer  = cancer_gd_lri,
+  stringsAsFactors = FALSE
+)
+
+# ── 6. Plot ───────────────────────────────────────────────────────────────────
+lri_umap_title_suffix <- if (LRI_UMAP_CANCER_FILTER == "All") "All Cancer Types" else
+                           paste0(LRI_UMAP_CANCER_FILTER, " Only")
+lri_umap_out_tag      <- tolower(LRI_UMAP_CANCER_FILTER)   # "all" / "breast" / "lung"
+
+p_lri_umap <- ggplot(umap_lri_df,
+                     aes(x = UMAP1, y = UMAP2,
+                         colour = Dataset, shape = Cancer)) +
+  geom_point(size = 1.8, alpha = 0.5) +
+  ggrepel::geom_text_repel(aes(label = Gene),
+    size = 2.5, max.overlaps = Inf,
+    box.padding = 0.3, segment.size = 0.2, segment.alpha = 0.4,
+    show.legend = FALSE) +
+  scale_colour_manual(values = LRI_UMAP_COLORS) +
+  scale_shape_manual(values = cancer_shapes) +
+  theme_classic(base_size = 13) +
+  labs(
+    title    = paste0("Gene × Dataset UMAP — LRI LogFC Space (",
+                      lri_umap_title_suffix, ")"),
+    subtitle = sprintf("Each point = Gene × Dataset | %d union LRIs | cosine distance",
+                       length(all_lris)),
+    colour = "Dataset", shape = "Cancer Type", x = "UMAP 1", y = "UMAP 2"
+  )
+
+print(p_lri_umap)
+ggsave(file.path(OUTPUT_DIR, sprintf("gene_dataset_lri_umap_%s.png", lri_umap_out_tag)),
+       plot = p_lri_umap, width = 10, height = 7, dpi = 300)
+message("Gene × Dataset LRI UMAP saved (", LRI_UMAP_CANCER_FILTER, ")")
+
+} # end for (LRI_UMAP_CANCER_FILTER in c("All", "Breast", "Lung"))
+# NOTE: umap_lri_df / feat_mat below reflect the last iteration ("Lung").
+
+# Expose for inspection
+# View(umap_lri_df)
+# feat_mat  — raw Gene × Dataset LogFC matrix (imputed NAs = 0)
+```
