@@ -12,8 +12,8 @@ Split from the monolithic `scDiffCom-Preprocessing-Checks.Rmd` (archived under `
 | `patient_zscore` | Patient-ZScore tertiles only |
 | `rankgenes` | RankGenes tertiles only |
 | `residual` | Residual tertiles only |
-| `both` | patient_zscore + rankgenes |
-| `all` | all three (default; skips missing dirs) |
+| `expression_quantile` | Expression tertiles only (`~/CCC-PreProcess/results-ExpressionQuantile`) |
+| `all` | all four (default; skips missing dirs) |
 
 ## Sections
 
@@ -32,7 +32,8 @@ Split from the monolithic `scDiffCom-Preprocessing-Checks.Rmd` (archived under `
 Run the `setup-preprocessing-checks` chunk in `index.Rmd`, then knit individual section files (or run chunks in order):
 
 - Seurat QC: setup → 01 → 02
-- Split-category comparison: setup → 04 (requires grouped `.rds` under each split output dir)
+- Split-category comparison only: in config set `CATEGORY_QC_RUN_PER_SOURCE <- FALSE` and `CATEGORY_QC_RUN_COMPARISON <- TRUE`, then setup → run chunk `split-category-comparison-facets` in `sections/04_split_category_distribution.Rmd` (or the matching child chunk in `index.Rmd`)
+- Split-category (all plots): setup → section 04 (requires grouped `.rds` under each split output dir)
 - Pseudobulk/split QC: setup → 06 / 07
 
 ## Outputs
@@ -44,4 +45,4 @@ Run the `setup-preprocessing-checks` chunk in `index.Rmd`, then knit individual 
 
 ## Pipeline order
 
-See [../README.md](../README.md): pseudobulk → RankGenes (and optionally PatientZScore / Residual) → run this notebook.
+See [../README.md](../README.md): pseudobulk → RankGenes (and optionally PatientZScore / Residual / ExpressionQuantile) → run this notebook.

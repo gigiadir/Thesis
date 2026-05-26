@@ -149,6 +149,9 @@ load_splits_for_source <- function(source, dataset_name, expr_mat) {
     patient_zscore = load_splits_from_grouped_dir(ZSCORE_SPLITS_DIR, dataset_name),
     rankgenes = load_splits_rankgenes(dataset_name, RANKGENES_DIR, expr_mat),
     residual = load_splits_residual(dataset_name, RESIDUAL_SPLITS_DIR, expr_mat),
+    expression_quantile = load_splits_from_grouped_dir(
+      EXPRESSION_QUANTILE_SPLITS_DIR, dataset_name
+    ),
     stop("Unknown split source: ", source)
   )
 }
