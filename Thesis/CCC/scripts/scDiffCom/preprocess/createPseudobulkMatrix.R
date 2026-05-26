@@ -7,7 +7,8 @@
 #   (2) force-included genes (default: scDiffCom panel + optional --gene_list / config).
 #
 # Matrix values: mean normalized expression (data layer) per patient within malignant cells.
-# Rows = genes, columns = patients.
+# Rows = genes, columns = patients (patients with no malignant cells are dropped; see *_dropped_patients.tsv).
+# Outputs: OUT_DIR/{dataset}/ holds matrix, gene sources, dropped-patient log, and dims summary per dataset.
 #
 # CLI examples:
 #   Rscript createPseudobulkMatrix.R
@@ -36,6 +37,7 @@ SAVE_ALL_AS_RDATA <- TRUE
 OUT_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
 MIN_DETECT_FRAC_IN_MALIGNANT <- 0.05
 GENE_SOURCES_SUFFIX <- "_pseudobulk_gene_sources.tsv"
+DROPPED_PATIENTS_SUFFIX <- "_pseudobulk_dropped_patients.tsv"
 
 PSEUDOBULK_CONFIG <- list(
   list(
@@ -259,7 +261,28 @@ build_maligexpr_patient_matrix <- function(
   mat <- as.matrix(mat)
   storage.mode(mat) <- "double"
 
-  list(matrix = mat, gene_sources = gene_sources)
+  all_na_patients <- colnames(mat)[apply(is.na(mat), 2L, all)]
+  dropped_patients <- data.frame(
+    patient = character(),
+    reason = character(),
+    stringsAsFactors = FALSE
+  )
+  if (length(all_na_patients) > 0L) {
+    dropped_patients <- data.frame(
+      patient = all_na_patients,
+      reason = "all_na_no_malignant_cells",
+      stringsAsFactors = FALSE
+    )
+    message(
+      dataset_name, ": dropping ", length(all_na_patients),
+      " patient column(s) with all NA values: ",
+      paste(head(all_na_patients, 10L), collapse = ", "),
+      if (length(all_na_patients) > 10L) " ..." else ""
+    )
+    mat <- mat[, !colnames(mat) %in% all_na_patients, drop = FALSE]
+  }
+
+  list(matrix = mat, gene_sources = gene_sources, dropped_patients = dropped_patients)
 }
 
 write_matrix_dims <- function(mat, path, n_force_only = NA_integer_) {
@@ -293,6 +316,21 @@ write_gene_sources_tsv <- function(gene_sources, path) {
     quote = FALSE
   )
   message("Wrote gene source table: ", path)
+}
+
+write_dropped_patients_tsv <- function(dropped_patients, path) {
+  utils::write.table(
+    dropped_patients,
+    file = path,
+    sep = "\t",
+    row.names = FALSE,
+    quote = FALSE
+  )
+  n <- nrow(dropped_patients)
+  message(
+    "Wrote dropped-patient log (", n, " row",
+    if (n == 1L) "" else "s", "): ", path
+  )
 }
 
 normalize_pseudobulk_job <- function(job) {
@@ -358,6 +396,7 @@ run_pseudobulk_pipeline <- function(
           job_force_include_genes = job$force_include_genes
         )
         attr(res$matrix, "gene_sources") <- res$gene_sources
+        attr(res$matrix, "dropped_patients") <- res$dropped_patients
         attr(res$matrix, "dataset_name") <- ds
         res$matrix
       },
@@ -378,21 +417,36 @@ run_pseudobulk_pipeline <- function(
   if (isTRUE(save_matrices) && length(expr_mats) > 0) {
     if (isTRUE(save_per_dataset_rds)) {
       purrr::iwalk(expr_mats, function(mat, ds) {
-        rds_path <- file.path(out_dir, paste0(ds, "_pseudobulk_matrix.rds"))
+        ds_dir <- file.path(out_dir, ds)
+        dir.create(ds_dir, recursive = TRUE, showWarnings = FALSE)
+        rds_path <- file.path(ds_dir, paste0(ds, "_pseudobulk_matrix.rds"))
         saveRDS(mat, file = rds_path)
         gs <- attr(mat, "gene_sources", exact = TRUE)
         if (!is.null(gs)) {
-          gs_path <- file.path(out_dir, paste0(ds, GENE_SOURCES_SUFFIX))
+          gs_path <- file.path(ds_dir, paste0(ds, GENE_SOURCES_SUFFIX))
           write_gene_sources_tsv(gs, gs_path)
         }
+        dropped <- attr(mat, "dropped_patients", exact = TRUE)
+        if (is.null(dropped)) {
+          dropped <- data.frame(
+            patient = character(),
+            reason = character(),
+            stringsAsFactors = FALSE
+          )
+        }
+        dropped_path <- file.path(ds_dir, paste0(ds, DROPPED_PATIENTS_SUFFIX))
+        write_dropped_patients_tsv(dropped, dropped_path)
         n_force_only <- NA_integer_
         if (!is.null(gs)) {
           n_force_only <- sum(gs$source == "force_include")
         }
-        dims_path <- file.path(out_dir, paste0(ds, "_pseudobulk_matrix.rds_dims.txt"))
+        dims_path <- file.path(ds_dir, paste0(ds, "_pseudobulk_matrix.rds_dims.txt"))
         write_matrix_dims(mat, dims_path, n_force_only = n_force_only)
       })
-      message("Saved per-dataset matrices and dimension summaries to: ", out_dir)
+      message(
+        "Saved per-dataset outputs under: ",
+        out_dir, " (one subdirectory per dataset)"
+      )
     }
 
     if (isTRUE(save_all_as_rdata)) {
