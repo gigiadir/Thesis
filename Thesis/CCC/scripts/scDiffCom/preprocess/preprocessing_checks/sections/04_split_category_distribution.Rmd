@@ -2,12 +2,13 @@
 
 Compare LOW/MID/HIGH counts per patient across split methods (`SPLIT_SOURCE` in config).
 
-```{r split-category-distribution, message=FALSE, warning=FALSE}
+Set `CATEGORY_QC_RUN_PER_SOURCE` / `CATEGORY_QC_RUN_COMPARISON` in [config/hnsc_preprocess_checks.R](../config/hnsc_preprocess_checks.R), or run only the chunk you need below (after setup).
+
+```{r split-category-per-patient, message=FALSE, warning=FALSE, eval=CATEGORY_QC_RUN_PER_SOURCE}
 dir.create(CATEGORY_QC_DIR, recursive = TRUE, showWarnings = FALSE)
 
 for (ds in DATASETS) {
-  message("\n=== Category distribution: ", ds, " ===")
-  comparison_counts <- list()
+  message("\n=== Category distribution (per patient): ", ds, " ===")
 
   for (src in split_sources) {
     base_dir <- SPLIT_BASE_DIRS[[src]]
@@ -28,18 +29,16 @@ for (ds in DATASETS) {
     out_png <- file.path(CATEGORY_QC_DIR, paste0(ds, "_", src, "_split_category_per_patient.png"))
     ggplot2::ggsave(out_png, p, width = 10, height = 6, dpi = 300)
     message("  Saved: ", out_png)
-
-    comparison_counts[[src]] <- count_df %>%
-      dplyr::mutate(split_source = factor(source_label))
   }
+}
+```
 
-  if (length(comparison_counts) >= 2L) {
-    combined <- dplyr::bind_rows(comparison_counts)
-    p_cmp <- plot_split_category_comparison(combined, ds)
-    print(p_cmp)
-    cmp_png <- file.path(CATEGORY_QC_DIR, paste0(ds, "_split_category_comparison_facets.png"))
-    ggplot2::ggsave(cmp_png, p_cmp, width = 10, height = 4 * length(comparison_counts), dpi = 300)
-    message("  Saved comparison: ", cmp_png)
-  }
+```{r split-category-comparison-facets, message=FALSE, warning=FALSE, eval=CATEGORY_QC_RUN_COMPARISON}
+dir.create(CATEGORY_QC_DIR, recursive = TRUE, showWarnings = FALSE)
+
+for (ds in DATASETS) {
+  message("\n=== Category distribution (comparison facets): ", ds, " ===")
+  comparison_counts <- collect_category_counts_by_source(ds)
+  save_split_category_comparison(ds, comparison_counts)
 }
 ```
