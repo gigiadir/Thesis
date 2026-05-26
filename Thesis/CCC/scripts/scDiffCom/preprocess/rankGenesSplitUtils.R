@@ -72,9 +72,13 @@ load_gene_patient_matrix <- function(path) {
 }
 
 resolve_pseudobulk_path <- function(dataset_name, input_dir) {
+  matrix_name <- paste0(dataset_name, PSEUDOBULK_MATRIX_SUFFIX)
   in_candidates <- c(
-    file.path(input_dir, paste0(dataset_name, PSEUDOBULK_MATRIX_SUFFIX)),
+    file.path(input_dir, dataset_name, matrix_name),
+    file.path(input_dir, matrix_name),
+    file.path(input_dir, dataset_name, paste0(dataset_name, "_gene_by_patient_means_exp.rds")),
     file.path(input_dir, paste0(dataset_name, "_gene_by_patient_means_exp.rds")),
+    file.path(input_dir, dataset_name, paste0(dataset_name, "_gene_by_patient_mean_expr.rds")),
     file.path(input_dir, paste0(dataset_name, "_gene_by_patient_mean_expr.rds"))
   )
   in_path <- in_candidates[file.exists(in_candidates)][1]
