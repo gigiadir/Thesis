@@ -18,7 +18,7 @@ Batch jobs: `Main-scDiffComPreprocess.R` → `submit_jobs.sh` (legacy per-gene S
 | `scDiffCom-Preprocess-ExpressionQuantile.R` | `~/CCC-PreProcess/results-ExpressionQuantile/` | Pseudobulk → same quantile rule as legacy |
 | `scDiffCom-Preprocess-RankGenes.R` | `~/CCC-PreProcess/results-RankGenes/` | Pseudobulk → column-wise rank tertiles |
 | `scDiffCom-Preprocess-Residual.R` | `~/CCC-PreProcess/results-Residual/` | Pseudobulk → PC-regressed tertiles |
-| `scDiffCom-Preprocess-PatientZScore.R` | `~/CCC-PreProcess/results-patients-zscore/` | Legacy metrics → z-score tertiles |
+| `scDiffCom-Preprocess-PatientZScore.R` | `~/CCC-PreProcess/results-Patient-ZScore/` | Pseudobulk → row z-score tertiles |
 
 ## Expression quantile + legacy equivalence
 
