@@ -3,9 +3,39 @@
 Typical order:
 
 1. `Rscript createPseudobulkMatrix.R --dataset_name <cohort>`
-2. `Rscript scDiffCom-Preprocess-RankGenes.R --dataset_name <cohort>`
-3. Optional: `scDiffCom-Preprocess-Residual.R`, then knit `preprocessing_checks/index.Rmd` or `scDiffCom-Preprocessing-Checks.Rmd` (wrapper)
+2. `Rscript scDiffCom-Preprocess-RankGenes.R --dataset_name <cohort>` (production pipeline input)
+3. Optional: `scDiffCom-Preprocess-ExpressionQuantile.R`, `scDiffCom-Preprocess-Residual.R`, `scDiffCom-Preprocess-PatientZScore.R`
+4. Optional: `compareExpressionSplitEquivalence.R` (legacy vs pseudobulk expression quantile)
+5. Optional: knit `preprocessing_checks/index.Rmd` or `scDiffCom-Preprocessing-Checks.Rmd` (wrapper)
 
-Batch jobs: `Main-scDiffComPreprocess.R` → `submit_jobs.sh` (written next to `scDiffComPreprocess.R`).
+Batch jobs: `Main-scDiffComPreprocess.R` → `submit_jobs.sh` (legacy per-gene Seurat quantile splits).
 
-Output: `~/CCC-PreProcess/results-RankGenes/` (used by `../pipeline/`).
+## Split methods
+
+| Script | Output dir | Rule |
+|--------|------------|------|
+| `scDiffComPreprocess.R` | `~/CCC-PreProcess/results/` | Seurat malignant means → `quantile(1/3, 2/3)` |
+| `scDiffCom-Preprocess-ExpressionQuantile.R` | `~/CCC-PreProcess/results-ExpressionQuantile/` | Pseudobulk → same quantile rule as legacy |
+| `scDiffCom-Preprocess-RankGenes.R` | `~/CCC-PreProcess/results-RankGenes/` | Pseudobulk → column-wise rank tertiles |
+| `scDiffCom-Preprocess-Residual.R` | `~/CCC-PreProcess/results-Residual/` | Pseudobulk → PC-regressed tertiles |
+| `scDiffCom-Preprocess-PatientZScore.R` | `~/CCC-PreProcess/results-patients-zscore/` | Legacy metrics → z-score tertiles |
+
+## Expression quantile + legacy equivalence
+
+```bash
+Rscript createPseudobulkMatrix.R --dataset_name Kurten_HNSC
+Rscript scDiffCom-Preprocess-ExpressionQuantile.R --dataset_name Kurten_HNSC
+Rscript compareExpressionSplitEquivalence.R --dataset_name Kurten_HNSC
+```
+
+Summaries: `~/Thesis/CCC/outputs/QC/split_equivalence/expression_quantile_equivalence_*.csv`
+
+**When splits should match exactly:** same patients, same `mean_expr`, same `--low_q` / `--high_q`.
+
+**Known reasons for disagreement** (even with identical quantile code):
+
+- Legacy uses malignant labels `Epithelial`, `Malignant`, `Tumor`, `Cancer`; pseudobulk config uses `Tumor` only.
+- Legacy keeps patients with `> 50` malignant cells; pseudobulk drops patients with no malignant cells.
+- Different gene sets (legacy runs one gene per job; pseudobulk is full matrix).
+
+If `max_abs_mean_expr_diff` is near zero but labels differ, check quantile tie-breaking; if diffs are large, filtering or cell-type definitions differ.

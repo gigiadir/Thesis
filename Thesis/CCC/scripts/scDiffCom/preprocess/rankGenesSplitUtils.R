@@ -1,5 +1,6 @@
-# Shared helpers for RankGenes, Residual, and split-similarity analysis.
+# Shared helpers for RankGenes, Residual, ExpressionQuantile, and split-similarity analysis.
 # Sourced by scDiffCom-Preprocess-RankGenes.R, scDiffCom-Preprocess-Residual.R,
+# scDiffCom-Preprocess-ExpressionQuantile.R, compareExpressionSplitEquivalence.R,
 # and analyzeGeneSplitJaccard.R.
 
 PSEUDOBULK_MATRIX_SUFFIX <- "_pseudobulk_matrix.rds"
@@ -46,6 +47,35 @@ assign_tertiles <- function(scores) {
   )
   out[ok] <- out_ok
   out
+}
+
+# Quantile-based LOW/MID/HIGH (matches scDiffComPreprocess.R).
+assign_quantile_groups <- function(scores, low_q = 1/3, high_q = 2/3) {
+  if (low_q >= high_q) {
+    stop("low_q must be strictly less than high_q. Got: ", low_q, ", ", high_q)
+  }
+  out <- rep(NA_character_, length(scores))
+  ok <- is.finite(scores)
+  if (!any(ok)) return(out)
+
+  qs <- stats::quantile(scores[ok], probs = c(low_q, high_q), na.rm = TRUE)
+  out[ok] <- ifelse(
+    scores[ok] <= qs[[1L]], "LOW",
+    ifelse(scores[ok] >= qs[[2L]], "HIGH", "MID")
+  )
+  out
+}
+
+build_expression_quantile_splits_matrix <- function(mat, low_q = 1/3, high_q = 2/3) {
+  genes <- rownames(mat)
+  patients <- colnames(mat)
+  splits <- matrix(NA_character_, nrow = length(genes), ncol = length(patients),
+                   dimnames = list(genes, patients))
+
+  for (i in seq_along(genes)) {
+    splits[i, ] <- assign_quantile_groups(mat[i, ], low_q = low_q, high_q = high_q)
+  }
+  splits
 }
 
 load_gene_patient_matrix <- function(path) {
@@ -295,17 +325,22 @@ load_gene_list <- function(path = NULL) {
   unique(as.character(g))
 }
 
-load_splits_from_rankgenes_dir <- function(rankgenes_dir, dataset_name, genes = NULL) {
-  ds_dir <- file.path(path.expand(rankgenes_dir), dataset_name)
+load_splits_from_grouped_dir <- function(base_dir, dataset_name, genes = NULL) {
+  ds_dir <- file.path(path.expand(base_dir), dataset_name)
   if (!dir.exists(ds_dir)) {
-    stop("RankGenes directory not found: ", ds_dir)
+    return(NULL)
+  }
+
+  all_splits_path <- file.path(ds_dir, paste0(dataset_name, ALL_SPLITS_SUFFIX))
+  if (is.null(genes) && file.exists(all_splits_path)) {
+    return(readRDS(all_splits_path))
   }
 
   if (is.null(genes)) {
     files <- list.files(ds_dir, pattern = paste0("_", dataset_name, "_grouped\\.rds$"),
                         full.names = TRUE)
     if (length(files) == 0L) {
-      stop("No grouped .rds files in ", ds_dir)
+      return(NULL)
     }
     genes <- sub(paste0("_", dataset_name, "_grouped\\.rds$"), "",
                  basename(files))
@@ -318,7 +353,7 @@ load_splits_from_rankgenes_dir <- function(rankgenes_dir, dataset_name, genes = 
     f <- file.path(ds_dir, paste0(gene, "_", dataset_name, "_grouped.rds"))
     if (!file.exists(f)) next
     df <- readRDS(f)
-    exp_col <- grep("_EXP$", colnames(df), value = TRUE)[1]
+    exp_col <- grep("_EXP$", colnames(df), ignore.case = TRUE, value = TRUE)[1]
     if (is.na(exp_col)) next
     if (is.null(patients)) {
       patients <- as.character(df$patient_id)
@@ -328,7 +363,7 @@ load_splits_from_rankgenes_dir <- function(rankgenes_dir, dataset_name, genes = 
   }
 
   if (length(split_rows) == 0L) {
-    stop("No splits loaded from ", ds_dir)
+    return(NULL)
   }
 
   genes_found <- names(split_rows)
@@ -336,6 +371,41 @@ load_splits_from_rankgenes_dir <- function(rankgenes_dir, dataset_name, genes = 
                    dimnames = list(genes_found, patients))
   for (g in genes_found) {
     splits[g, ] <- split_rows[[g]]
+  }
+  splits
+}
+
+load_one_grouped_gene <- function(path) {
+  if (!file.exists(path)) {
+    return(NULL)
+  }
+  df <- tryCatch(readRDS(path), error = function(e) NULL)
+  if (is.null(df) || !is.data.frame(df)) {
+    return(NULL)
+  }
+  exp_col <- grep("_EXP$", colnames(df), ignore.case = TRUE, value = TRUE)[1]
+  if (is.na(exp_col) || !"patient_id" %in% colnames(df)) {
+    return(NULL)
+  }
+  patients <- as.character(df$patient_id)
+  mean_expr <- if ("mean_expr" %in% colnames(df)) {
+    setNames(as.numeric(df$mean_expr), patients)
+  } else {
+    NULL
+  }
+  splits <- setNames(as.character(df[[exp_col]]), patients)
+  list(patients = patients, mean_expr = mean_expr, splits = splits)
+}
+
+load_splits_from_rankgenes_dir <- function(rankgenes_dir, dataset_name, genes = NULL) {
+  ds_dir <- file.path(path.expand(rankgenes_dir), dataset_name)
+  if (!dir.exists(ds_dir)) {
+    stop("RankGenes directory not found: ", ds_dir)
+  }
+
+  splits <- load_splits_from_grouped_dir(rankgenes_dir, dataset_name, genes = genes)
+  if (is.null(splits)) {
+    stop("No splits loaded from ", ds_dir)
   }
   splits
 }
