@@ -1,0 +1,1332 @@
+---
+title: "scDiffCom-Preprocessing-Checks"
+output: html_document
+---
+
+# Load Seurats
+```{r}
+Load.Seurat.With.Patients.Data <- function(ds_path, ps_path, gene_col, patient_col_in_seurat) {
+     message("Loading raw Seurat object...")
+    ext <- tolower(tools::file_ext(ds_path))
+    if (ext == "rds") {
+      obj <- readRDS(ds_path)
+    } else if (ext %in% c("rdata", "rda")) {
+      miceadds::load.Rdata(ds_path, "obj")
+    } else {
+      stop(paste("Unsupported file format:", ext, ". Supported formats: .rds, .RData, .rda"))
+    }
+    
+    message("Loading patient summary (preprocess output)...")
+    ps <- readRDS(ps_path) 
+    
+    if (!patient_col_in_seurat %in% colnames(obj@meta.data)) {
+      stop(sprintf("Error: Column '%s' not found in Seurat metadata.", patient_col_in_seurat))
+    }
+    
+    message(sprintf("Merging %s classifications...", gene_col))
+    
+    # Map patient IDs to their HIGH/LOW/MID status
+    mapping_vec <- setNames(ps[[gene_col]], ps$patient_id)
+    
+    # Apply mapping to the Seurat metadata
+    obj@meta.data[[gene_col]] <- mapping_vec[as.character(obj@meta.data[[patient_col_in_seurat]])]
+    
+    return(list(
+      seurat = obj, 
+      patient_summary = as.data.frame(ps)
+    ))
+}
+```
+
+# Load Data
+```{r}
+# Qian.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Qian2020_Breast_step4.RDS",
+#                                             ps_path = "~/outputs/Qian2020_Breast_step4/AXL_Qian2020_Breast_step4_grouped.rds",
+#                                             gene_col ="AXL_EXP",
+#                                             patient_col_in_seurat = "ident")
+# 
+# Chan.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Chan2021_Lung_step4.RDS",
+#                                             ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Chan2021_Lung_step4/AXL_Chan2021_Lung_step4_grouped.rds",
+#                                             gene_col ="AXL_EXP",
+#                                             patient_col_in_seurat = "ident")
+# 
+# Laughney.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Laughney2020_Lung_step4.RDS",
+#                                             ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Laughney2020_Lung_step4/AXL_Laughney2020_Lung_step4_grouped.rds",
+#                                             gene_col ="AXL_EXP",
+#                                             patient_col_in_seurat = "ident")
+# 
+# Bassez.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Bassez2021_Breast_step4.RDS",
+#                                             ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Bassez2021_Breast_step4/AXL_Bassez2021_Breast_step4_grouped.rds",
+#                                             gene_col ="AXL_EXP",
+#                                             patient_col_in_seurat = "ident")
+
+Bill_HNSC.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Bill_HNSC.RData",
+                                              ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Bill_HNSC/AXL_Bill_HNSC_grouped.rds",
+                                              gene_col ="AXL_EXP",
+                                              patient_col_in_seurat = "Patient")
+Choi_HNSC.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Choi_HNSC.RData",
+                                              ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Choi_HNSC/AXL_Choi_HNSC_grouped.rds",
+                                              gene_col ="AXL_EXP",
+                                              patient_col_in_seurat = "Patient")
+Kurten_HNSC.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Kurten_HNSC.RData",
+                                              ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Kurten_HNSC/AXL_Kurten_HNSC_grouped.rds",
+                                              gene_col ="AXL_EXP",
+                                              patient_col_in_seurat = "Patient")
+Puram_HNSC.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Puram_HNSC.RData",
+                                              ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Puram_HNSC/AXL_Puram_HNSC_grouped.rds",
+                                              gene_col ="AXL_EXP",
+                                              patient_col_in_seurat = "Patient")
+
+```
+
+# Check Seurat object Cell-Type-Distribution
+```{r}
+
+library(dplyr)
+library(ggplot2)
+library(Seurat)
+
+plot_patient_composition <- function(obj, patient_summary, gene_col_exp_name, ds_name,
+                                     cell_type_column = "Consensus_Cell_Type",
+                                     patient_col_in_seurat = "ident",
+                                     use_proportions = FALSE) {
+
+  gene_col <- grep("_EXP$", colnames(patient_summary), value = TRUE)
+
+  # Pull metadata, extract patient column
+  meta <- obj@meta.data
+  meta$patient <- as.character(meta[[patient_col_in_seurat]])
+  meta <- meta[!is.na(meta$patient), ]
+
+  # Order all patients by mean_expr descending; patients not in summary sort last
+  all_patients <- unique(meta$patient)
+  ordered_patients <- data.frame(patient = all_patients, stringsAsFactors = FALSE) %>%
+    left_join(patient_summary[, c("patient_id", "mean_expr")],
+              by = c("patient" = "patient_id")) %>%
+    arrange(desc(mean_expr)) %>%
+    pull(patient)
+
+  # Build x-axis labels: "patient\nHIGH/MID/LOW" for labeled patients, else just patient
+  label_map <- setNames(patient_summary[[gene_col]], patient_summary$patient_id)
+  x_labels <- setNames(
+    ifelse(ordered_patients %in% names(label_map),
+           paste0(ordered_patients, "\n", label_map[ordered_patients]),
+           ordered_patients),
+    ordered_patients
+  )
+
+  cell_counts <- meta %>%
+    dplyr::filter(!is.na(.data[[cell_type_column]])) %>%
+    # Rename the dynamic column to "cell_type" to safely pass it down the pipe
+    dplyr::rename(cell_type = dplyr::all_of(cell_type_column)) %>%
+    # Explicitly use dplyr::count to prevent package masking
+    dplyr::count(patient, cell_type) %>%
+    dplyr::group_by(patient) %>%
+    dplyr::mutate(prop = n / sum(n)) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(cell_type = factor(cell_type,
+                                     levels = c("Epithelial",
+                                                    sort(setdiff(unique(cell_type), "Epithelial")))))
+
+  y_var   <- if (use_proportions) "prop" else "n"
+  y_label <- if (use_proportions) "Proportion" else "Cell Count"
+
+  p <- ggplot(cell_counts, aes(x = patient, y = .data[[y_var]], fill = cell_type)) +
+    geom_bar(stat = "identity")
+
+  if (!use_proportions)
+    p <- p + geom_hline(yintercept = 50, linetype = "dashed", alpha = 0.4) +
+             scale_y_continuous(breaks = function(x) sort(unique(c(pretty(x), 50))))
+
+  p +
+    scale_x_discrete(limits = ordered_patients, labels = x_labels) +
+    labs(x = "Patient", y = y_label,
+         title = paste(ds_name, "Cell Type Distribution:", gene_col_exp_name),
+         fill = "Cell Type") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      axis.ticks.x = element_blank(),
+      legend.title = element_text(size = 10),
+      panel.grid = element_blank(),
+      panel.background = element_blank()
+    )
+}
+
+# Qian.AXL.plot <- plot_patient_composition(obj = Qian.AXL$seurat,
+#                                            patient_summary =Qian.AXL$patient_summary,
+#                                            gene_col_exp_name = "AXL_EXP",
+#                                            ds_name = "Qian2020 - Breast",
+#                                            patient_col_in_seurat = "ident",
+#                                           cell_type_column = "cell_type")
+# 
+# Chan.AXL.plot <- plot_patient_composition(obj = Chan.AXL$seurat,
+#                                            patient_summary =Chan.AXL$patient_summary,
+#                                            gene_col_exp_name = "AXL_EXP",
+#                                            ds_name = "Chan2021 - Lung",
+#                                            patient_col_in_seurat = "ident",
+#                                           cell_type_column = "cell_type")
+# 
+# Laughney.AXL.plot <- plot_patient_composition(obj = Laughney.AXL$seurat,
+#                                            patient_summary =Laughney.AXL$patient_summary,
+#                                            gene_col_exp_name = "AXL_EXP",
+#                                            ds_name = "Laughney2020 - Lung",
+#                                            patient_col_in_seurat = "ident",
+#                                            cell_type_column = "cell_type")
+# 
+# Bassez.AXL.plot <- plot_patient_composition(obj = Bassez.AXL$seurat,
+#                                            patient_summary =Bassez.AXL$patient_summary,
+#                                            gene_col_exp_name = "AXL_EXP",
+#                                            ds_name = "Bassez2021 - Breast",
+#                                            patient_col_in_seurat = "ident",
+#                                            cell_type_column = "cell_type",
+#                                            use_proportions = TRUE)
+
+Kurten_HNSC.AXL.plot <- plot_patient_composition(obj = Kurten_HNSC.AXL$seurat,
+                                           patient_summary =Kurten_HNSC.AXL$patient_summary,
+                                           gene_col_exp_name = "AXL_EXP",
+                                           ds_name = "Kurten - H&N",
+                                           patient_col_in_seurat = "Patient",
+                                           cell_type_column = "Cell_Type",
+                                           use_proportions = TRUE)
+
+out_dir <- "~/Thesis/CCC/outputs/scDiffCom/QC"
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ggsave(file.path(out_dir, "Qian2020_Breast_AXL_cell_type_distribution_original_cell_type.png"),    Qian.AXL.plot,    width = 20, height = 6)
+# ggsave(file.path(out_dir, "Chan2021_Lung_AXL_cell_type_distribution.png"),      Chan.AXL.plot,    width = 20, height = 6)
+# ggsave(file.path(out_dir, "Laughney2020_Lung_AXL_cell_type_distribution.png"),  Laughney.AXL.plot, width = 20, height = 6)
+# ggsave(file.path(out_dir, "Bassez2021_Breast_AXL_cell_type_distribution.png"),  Bassez.AXL.plot,  width = 20, height = 6)
+ggsave(file.path(out_dir, "Kurten_HNSC_AXL_cell_Type_distribution.png"), Kurten_HNSC.AXL.plot, width = 20, height = 6)
+```
+
+
+# Merge + ComBat Batch Correction + UMAP Integration
+```{r merge-combat-umap, message=FALSE, warning=FALSE}
+# Dependencies ─────────────────────────────────────────────────────────────────
+if (!requireNamespace("sva",       quietly = TRUE)) stop("BiocManager::install('sva')")
+if (!requireNamespace("patchwork", quietly = TRUE)) stop("install.packages('patchwork')")
+if (!requireNamespace("Matrix",    quietly = TRUE)) stop("install.packages('Matrix')")
+
+library(Seurat)
+library(sva)
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(Matrix)
+
+# Config ───────────────────────────────────────────────────────────────────────
+SEURAT_DIR <- path.expand("~/scObjects")
+OUTPUT_DIR <- path.expand("~/Thesis/CCC/outputs/scDiffCom/integration")
+N_FEATURES <- 3000
+N_PCS      <- 30
+CT_COL     <- "Cell_Type"
+SEURAT_V5  <- utils::packageVersion("Seurat") >= "5.0.0"
+dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+# ── 1. Load objects and stamp source label ────────────────────────────────────
+stamp_source <- function(fname, label) {
+   message("Loading raw Seurat object...")
+    path <- file.path(SEURAT_DIR, fname)
+    ext <- tolower(tools::file_ext(path))
+    if (ext == "rds") { 
+      obj <- readRDS(path)
+    } else if (ext %in% c("rdata", "rda")) {
+      miceadds::load.Rdata(path, "obj")
+    } else {
+      stop(paste("Unsupported file format:", ext, ". Supported formats: .rds, .RData, .rda"))
+    }
+  obj$source <- label
+  message("Loaded ", fname, " — ", ncol(obj), " cells")
+  obj
+}
+
+HNSC.Atlas <- stamp_source("HNSCC.Atlas.RData", "HNSC_Atlas")
+puram <- stamp_source("Puram_HNSC.RData", "Puram_HNSC")
+choi   <- stamp_source("Choi_HNSC.RData",    "Choi_HNSC")
+kurten <- stamp_source("Kurten_HNSC.RData",  "Kurten_HNSC")
+bill   <- stamp_source("Bill_HNSC.RData",    "Bill_HNSC")
+
+# ── 2. Individual UMAPs (runs full Seurat pipeline if UMAP absent) ────────────
+ensure_umap <- function(obj, label) {
+  if ("umap" %in% names(obj@reductions)) {
+    message(label, ": UMAP already present — skipping preprocessing.")
+    return(obj)
+  }
+  message(label, ": no UMAP found — running NormalizeData → PCA → UMAP ...")
+  obj <- NormalizeData(obj, verbose = FALSE)
+  obj <- FindVariableFeatures(obj, nfeatures = N_FEATURES, verbose = FALSE)
+  obj <- ScaleData(obj, verbose = FALSE)
+  obj <- RunPCA(obj, npcs = N_PCS, verbose = FALSE)
+  obj <- FindNeighbors(obj, dims = 1:N_PCS, verbose = FALSE)
+  obj <- RunUMAP(obj, dims = 1:N_PCS, verbose = FALSE)
+  obj
+}
+puram  <- ensure_umap(puram,  "Puram_HNSC")
+choi   <- ensure_umap(choi,   "Choi_HNSC")
+kurten <- ensure_umap(kurten, "Kurten_HNSC")
+bill   <- ensure_umap(bill,   "Bill_HNSC")
+
+ind_umap_plot <- function(obj, label) {
+  col <- if (CT_COL %in% colnames(obj@meta.data)) CT_COL else "seurat_clusters"
+  DimPlot(obj, reduction = "umap", group.by = col, label = TRUE, repel = TRUE,
+          pt.size = 0.3) +
+    ggtitle(label) +
+    theme(plot.title      = element_text(face = "bold", size = 11),
+          legend.text     = element_text(size = 7),
+          legend.key.size = unit(0.35, "cm"))
+}
+p_ind <- ((ind_umap_plot(puram,  "Puram_HNSC")  |
+           ind_umap_plot(choi,   "Choi_HNSC")) /
+          (ind_umap_plot(kurten, "Kurten_HNSC") |
+           ind_umap_plot(bill,   "Bill_HNSC"))) +
+  plot_annotation(
+    title = "Individual UMAPs — H&N Datasets",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+print(p_ind)
+ggsave(file.path(OUTPUT_DIR, "01_individual_umaps.png"),
+       p_ind, width = 18, height = 14, dpi = 300)
+message("Saved 01_individual_umaps.png")
+
+# ── 3. Merge ──────────────────────────────────────────────────────────────────
+message("\nMerging Puram_HNSC, Choi_HNSC, Kurten_HNSC, Bill_HNSC ...")
+merged <- merge(puram, y = list(choi, kurten, bill),
+                add.cell.ids = c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC"))
+message("Merged object: ", ncol(merged), " cells")
+
+# ── 4. Normalize and select variable features (join layers first for v5) ──────
+DefaultAssay(merged) <- "RNA"
+if (SEURAT_V5) merged <- JoinLayers(merged)
+merged <- NormalizeData(merged, verbose = FALSE)
+merged <- FindVariableFeatures(merged, nfeatures = N_FEATURES, verbose = FALSE)
+var_genes <- VariableFeatures(merged)
+message("Variable features selected: ", length(var_genes))
+
+# ── 5. Extract log-normalised matrix for ComBat ───────────────────────────────
+# ComBat operates on log-normalised values; corrected matrix is stored as a
+# separate 'ComBat' assay so the original RNA assay is preserved intact.
+log_mat <- as.matrix(
+  if (SEURAT_V5) GetAssayData(merged, assay = "RNA", layer = "data")[var_genes, ]
+  else           GetAssayData(merged, assay = "RNA", slot  = "data")[var_genes, ]
+)
+batch_vec <- as.character(merged$source)
+message("Batch sizes: ",
+        paste(paste0(names(table(batch_vec)), "=", table(batch_vec)), collapse = ", "))
+
+# Drop genes with zero variance in any single batch (ComBat cannot handle these)
+batch_var <- do.call(cbind, lapply(unique(batch_vec), function(b)
+  apply(log_mat[, batch_vec == b, drop = FALSE], 1, var)
+))
+keep        <- rowSums(batch_var == 0) == 0
+var_genes_f <- var_genes[keep]
+log_mat_f   <- log_mat[keep, ]
+message("Removed ", sum(!keep), " zero-variance gene(s); ",
+        sum(keep), " genes retained for ComBat.")
+
+# ── 6. ComBat batch correction ────────────────────────────────────────────────
+message("Running sva::ComBat (parametric prior) on ",
+        nrow(log_mat_f), " genes x ", ncol(log_mat_f), " cells ...")
+combat_mat <- sva::ComBat(dat        = log_mat_f,
+                           batch      = batch_vec,
+                           par.prior  = TRUE,
+                           prior.plots = FALSE)
+message("ComBat complete.")
+
+# ── 7. Store corrected matrix as new 'ComBat' assay ───────────────────────────
+sparse_cb          <- Matrix::Matrix(combat_mat, sparse = TRUE)
+merged[["ComBat"]] <- tryCatch(
+  CreateAssay5Object(data = sparse_cb),          # Seurat >= 5
+  error = function(e) CreateAssayObject(data = sparse_cb)   # Seurat v4 fallback
+)
+DefaultAssay(merged)     <- "ComBat"
+VariableFeatures(merged) <- var_genes_f
+
+# ── 8. Scale → PCA → UMAP on ComBat-corrected assay ──────────────────────────
+message("ScaleData → RunPCA → RunUMAP on ComBat assay ...")
+merged <- ScaleData(merged,      features       = var_genes_f,       verbose = FALSE)
+merged <- RunPCA(merged,         features       = var_genes_f,
+                 npcs            = N_PCS,
+                 reduction.name  = "pca_combat",                     verbose = FALSE)
+merged <- FindNeighbors(merged,  reduction      = "pca_combat",
+                         dims   = 1:N_PCS,                           verbose = FALSE)
+merged <- FindClusters(merged,                                        verbose = FALSE)
+merged <- RunUMAP(merged,        reduction      = "pca_combat",
+                  dims           = 1:N_PCS,
+                  reduction.name = "umap_combat",                    verbose = FALSE)
+message("Dimensionality reduction complete.")
+
+# ── 9. Integrated UMAP — Consensus Cell Type ─────────────────────────────────
+ct_col_use <- if (CT_COL %in% colnames(merged@meta.data)) CT_COL else "seurat_clusters"
+p_ct <- DimPlot(merged, reduction = "umap_combat", group.by = ct_col_use,
+                label = TRUE, repel = TRUE, pt.size = 0.25) +
+  ggtitle(paste("Integrated UMAP —", ct_col_use)) +
+  theme(plot.title      = element_text(face = "bold"),
+        legend.text     = element_text(size = 8),
+        legend.key.size = unit(0.4, "cm"))
+
+# ── 10. Integrated UMAP — Source Dataset (batch-correction quality check) ─────
+src_pal <- c(Puram_HNSC  = "#1B9E77",
+             Choi_HNSC   = "#D95F02",
+             Kurten_HNSC = "#7570B3",
+             Bill_HNSC   = "#E7298A")
+p_src <- DimPlot(merged, reduction = "umap_combat", group.by = "source",
+                 cols = src_pal, pt.size = 0.25) +
+  ggtitle("Integrated UMAP — Source Dataset") +
+  theme(plot.title = element_text(face = "bold"))
+
+p_combined <- (p_ct / p_src) +
+  plot_annotation(
+    title    = "ComBat-Corrected H&N Integration",
+    subtitle = sprintf("%d cells | %d variable features | %d PCs",
+                       ncol(merged), length(var_genes_f), N_PCS),
+    theme    = theme(
+      plot.title    = element_text(size = 14, face = "bold",  hjust = 0.5),
+      plot.subtitle = element_text(size = 10, colour = "grey40", hjust = 0.5)
+    )
+  )
+
+print(p_ct)
+print(p_src)
+print(p_combined)
+
+ggsave(file.path(OUTPUT_DIR, "02_integrated_umap_celltype.png"),
+       p_ct,       width = 12, height = 9,  dpi = 300)
+ggsave(file.path(OUTPUT_DIR, "03_integrated_umap_source.png"),
+       p_src,      width = 10, height = 8,  dpi = 300)
+ggsave(file.path(OUTPUT_DIR, "04_integrated_umap_combined.png"),
+       p_combined, width = 12, height = 18, dpi = 300)
+message("Saved integrated UMAP plots (02, 03, 04).")
+
+# ── 11. Save final ComBat-corrected Seurat object ─────────────────────────────
+out_rds <- file.path(OUTPUT_DIR, "HNSC_ComBat_integrated.rds")
+saveRDS(merged, out_rds)
+message("\nFinal object saved to: ", out_rds)
+message("Assays     : ", paste(Assays(merged),              collapse = ", "))
+message("Reductions : ", paste(names(merged@reductions),    collapse = ", "))
+message("Cells      : ", ncol(merged))
+message("Metadata   : ", paste(colnames(merged@meta.data),  collapse = ", "))
+```
+
+
+
+#Check patient distribution
+```{r}
+library(tidyr)
+# opt$column_id <- "ident_source"
+merged.results <- helpers$add_malignant_gene_group(seurat_obj = HNSC.Atlas,
+                                            gene = "CTLA4",
+                                            cell_type_col = "Cell_Type",
+                                            assay="RNA")
+
+merged.results.ps <- merged.results$patient_summary
+
+# This creates a 2D grid of counts
+counts_table <- table(merged.results.ps$CTLA4_EXP, merged.results.ps$Project)
+print(counts_table)
+
+```
+
+
+
+# Data validation: expression category distribution per patient
+
+```{r gene-expression-category-distribution, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# For each dataset, calculate and plot the distribution of HIGH/MID/LOW calls per patient
+# across all analyzed genes.
+BASE_RESULTS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
+
+
+dataset_names <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
+
+if (length(dataset_names) == 0) {
+  message("No dataset names found (no *.AXL objects, and results dir missing). Skipping.")
+} else {
+  expr_levels <- c("LOW", "MID", "HIGH")
+  expr_pal <- c(LOW = "#4E79A7", MID = "#F28E2B", HIGH = "#E15759")
+
+  read_grouped_file <- function(rds_path, dataset_name) {
+    df <- tryCatch(readRDS(rds_path), error = function(e) NULL)
+    if (is.null(df) || !is.data.frame(df) || ncol(df) != 3) return(NULL)
+
+    # Expect columns: patient_id, mean_expr, {gene}_exp (dynamic)
+    exp_col <- colnames(df)[3]
+    gene <- sub(paste0("_", dataset_name, "_grouped\\.rds$"), "", basename(rds_path))
+
+    df %>%
+      dplyr::select(patient_id, dplyr::all_of(exp_col)) %>%
+      dplyr::rename(expression_level = dplyr::all_of(exp_col)) %>%
+      dplyr::mutate(
+        gene = gene,
+        expression_level = as.character(expression_level)
+      )
+  }
+
+  for (ds in dataset_names) {
+    ds_dir <- file.path(BASE_RESULTS_DIR, ds)
+    if (!dir.exists(ds_dir)) {
+      message("Dataset directory not found: ", ds_dir, " (skipping)")
+      next
+    }
+
+    rds_files <- list.files(
+      ds_dir,
+      pattern = paste0("_", ds, "_grouped\\.rds$"),
+      full.names = TRUE
+    )
+
+    if (length(rds_files) == 0) {
+      message("No grouped .rds files found for dataset: ", ds, " (skipping)")
+      next
+    }
+
+    agg <- rds_files %>%
+      lapply(read_grouped_file, dataset_name = ds) %>%
+      Filter(Negate(is.null), .) %>%
+      bind_rows()
+
+    if (nrow(agg) == 0) {
+      message("No readable/valid files for dataset: ", ds, " (skipping)")
+      next
+    }
+
+    count_df <- agg %>%
+      dplyr::filter(!is.na(patient_id), !is.na(expression_level)) %>%
+      dplyr::mutate(
+        patient_id = as.character(patient_id),
+        expression_level = factor(expression_level, levels = expr_levels)
+      ) %>%
+      dplyr::count(patient_id, expression_level, name = "n") %>%
+      tidyr::complete(patient_id, expression_level, fill = list(n = 0))
+
+    p <- ggplot(count_df, aes(x = patient_id, y = n, fill = expression_level)) +
+      geom_col(
+        position = position_dodge2(width = 0.9, preserve = "single"),
+        width = 0.8,
+        color = "white",
+        linewidth = 0.15
+      ) +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+      scale_fill_manual(values = expr_pal, drop = FALSE) +
+      labs(
+        title = paste0(ds, ": Gene expression category distribution per patient (Patients Z-Score)"),
+        x = "patient_id",
+        y = "Number of analyzed genes",
+        fill = "Expression\ncategory"
+      ) +
+      theme_minimal(base_size = 11) +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        panel.grid.major.x = element_blank()
+      )
+
+    print(p)
+
+    qc_plot_dir <- path.expand("~/Thesis/CCC/outputs/plots/QC")
+    dir.create(qc_plot_dir, recursive = TRUE, showWarnings = FALSE)
+    ggsave(
+      filename = file.path(qc_plot_dir, paste0(ds, "_zscore_expression_category_distribution_per_patient.png")),
+      plot = p,
+      width = 10,
+      height = 6,
+      dpi = 300
+    )
+  }
+}
+```
+
+# Gene dispersion: pseudobulk expression vs patient splits
+
+Compare per-gene cross-patient dispersion in **continuous pseudobulk expression** vs **discrete HIGH/LOW/MID** patient classifications.
+
+- **Expression metric:** row-wise SD of raw pseudobulk values (not SD of row z-scores, which is ~1 by construction).
+- **Split metric:** row-wise SD of numeric-encoded labels (`LOW=1`, `MID=2`, `HIGH=3`).
+
+`SPLIT_SOURCE` selects which classification pipeline to use (or both):
+
+| Source | Meaning of split-space SD |
+|--------|---------------------------|
+| `patient_zscore` | Tertiles from row-wise z-scores of expression ([scDiffCom-Preprocess-PatientZScore.R](scDiffCom-Preprocess-PatientZScore.R)) — measures compression from tertiling expression |
+| `rankgenes` | Tertiles from within-patient ranks ([scDiffCom-Preprocess-RankGenes.R](scDiffCom-Preprocess-RankGenes.R)) — reflects patient-specific ranking, not expression variance alone |
+| `residual` | Tertiles from PC-regressed pseudobulk residuals ([scDiffCom-Preprocess-Residual.R](scDiffCom-Preprocess-Residual.R)) — expression adjusted for patient-level PCA structure |
+
+```{r gene-dispersion-expr-vs-split, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+
+# ── Config ────────────────────────────────────────────────────────────────────
+SPLIT_SOURCE <- "both"   # "patient_zscore" | "rankgenes" | "residual" | "both" | "all"
+DATASETS <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
+PSEUDOBULK_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
+ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
+RANKGENES_DIR <- path.expand("~/CCC-PreProcess/results-RankGenes")
+RESIDUAL_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-Residual")
+QC_OUT_DIR <- path.expand("~/Thesis/CCC/outputs/plots/QC/gene_dispersion")
+
+split_sources <- switch(
+  SPLIT_SOURCE,
+  patient_zscore = "patient_zscore",
+  rankgenes = "rankgenes",
+  residual = "residual",
+  both = c("patient_zscore", "rankgenes"),
+  all = c("patient_zscore", "rankgenes", "residual"),
+  stop("SPLIT_SOURCE must be 'patient_zscore', 'rankgenes', 'residual', 'both', or 'all'. Got: ", SPLIT_SOURCE)
+)
+
+split_source_labels <- c(
+  patient_zscore = "Patient-ZScore tertiles",
+  rankgenes = "RankGenes tertiles (within-patient rank)",
+  residual = "Residual tertiles (PC-regressed pseudobulk)"
+)
+
+# ── Shared helpers (rankGenesSplitUtils.R) ────────────────────────────────────
+script_dir <- tryCatch(
+  dirname(knitr::current_input(dir = TRUE)),
+  error = function(e) NULL
+)
+if (is.null(script_dir) || !nzchar(script_dir)) {
+  script_dir <- normalizePath(".", winslash = "/")
+}
+source(file.path(script_dir, "rankGenesSplitUtils.R"))
+
+LABEL_NUM <- c(LOW = 1, MID = 2, HIGH = 3)
+
+row_dispersion <- function(mat) {
+  if (requireNamespace("matrixStats", quietly = TRUE)) {
+    return(matrixStats::rowSds(mat, na.rm = TRUE))
+  }
+  apply(mat, 1, stats::sd, na.rm = TRUE)
+}
+
+encode_splits <- function(splits_chr) {
+  out <- matrix(NA_real_, nrow = nrow(splits_chr), ncol = ncol(splits_chr),
+                dimnames = dimnames(splits_chr))
+  for (lev in names(LABEL_NUM)) {
+    out[splits_chr == lev] <- LABEL_NUM[[lev]]
+  }
+  storage.mode(out) <- "double"
+  out
+}
+
+row_dispersion_expr <- function(mat) {
+  row_dispersion(mat)
+}
+
+row_dispersion_split <- function(splits_chr) {
+  row_dispersion(encode_splits(splits_chr))
+}
+
+align_matrices <- function(expr_mat, splits_mat) {
+  genes <- intersect(rownames(expr_mat), rownames(splits_mat))
+  patients <- intersect(colnames(expr_mat), colnames(splits_mat))
+  if (length(genes) == 0L || length(patients) == 0L) {
+    return(NULL)
+  }
+  list(
+    expr = expr_mat[genes, patients, drop = FALSE],
+    splits = splits_mat[genes, patients, drop = FALSE]
+  )
+}
+
+compare_dispersion <- function(sd_expr, sd_split) {
+  n <- length(sd_expr)
+  if (is.null(names(sd_expr))) names(sd_expr) <- seq_len(n)
+  valid <- is.finite(sd_expr) & is.finite(sd_split) & sd_expr > 0
+  data.frame(
+    gene = names(sd_expr)[valid],
+    sd_expr = unname(sd_expr[valid]),
+    sd_split = unname(sd_split[valid]),
+    ratio = unname(sd_split[valid] / sd_expr[valid]),
+    stringsAsFactors = FALSE
+  )
+}
+
+load_splits_from_grouped_dir <- function(base_dir, dataset_name) {
+  ds_dir <- file.path(path.expand(base_dir), dataset_name)
+  if (!dir.exists(ds_dir)) {
+    return(NULL)
+  }
+
+  files <- list.files(
+    ds_dir,
+    pattern = paste0("_", dataset_name, "_grouped\\.rds$"),
+    full.names = TRUE
+  )
+  if (length(files) == 0L) {
+    return(NULL)
+  }
+
+  patients <- NULL
+  split_rows <- list()
+
+  for (f in files) {
+    df <- tryCatch(readRDS(f), error = function(e) NULL)
+    if (is.null(df) || !is.data.frame(df)) next
+
+    exp_col <- grep("_exp$", colnames(df), ignore.case = TRUE, value = TRUE)[1]
+    if (is.na(exp_col)) next
+
+    gene <- sub(paste0("_", dataset_name, "_grouped\\.rds$"), "", basename(f))
+    if (is.null(patients)) {
+      patients <- as.character(df$patient_id)
+    }
+    vec <- setNames(as.character(df[[exp_col]]), as.character(df$patient_id))
+    split_rows[[gene]] <- vec[patients]
+  }
+
+  if (length(split_rows) == 0L) {
+    return(NULL)
+  }
+
+  genes_found <- names(split_rows)
+  splits <- matrix(NA_character_, nrow = length(genes_found), ncol = length(patients),
+                   dimnames = list(genes_found, patients))
+  for (g in genes_found) {
+    splits[g, ] <- split_rows[[g]]
+  }
+  splits
+}
+
+load_splits_rankgenes <- function(dataset_name, rankgenes_dir, expr_mat) {
+  ds_dir <- file.path(path.expand(rankgenes_dir), dataset_name)
+  all_splits_path <- file.path(ds_dir, paste0(dataset_name, ALL_SPLITS_SUFFIX))
+
+  if (file.exists(all_splits_path)) {
+    message("  Loading RankGenes splits: ", all_splits_path)
+    return(readRDS(all_splits_path))
+  }
+
+  splits <- tryCatch(
+    load_splits_from_rankgenes_dir(rankgenes_dir, dataset_name),
+    error = function(e) NULL
+  )
+  if (!is.null(splits)) {
+    message("  Loaded RankGenes splits from grouped .rds files in ", ds_dir)
+    return(splits)
+  }
+
+  message("  RankGenes splits not found; building from pseudobulk (column-wise rank tertiles).")
+  rank_mat <- compute_rank_matrix(expr_mat)
+  build_patient_splits_matrix(expr_mat, rank_mat = rank_mat)
+}
+
+load_splits_residual <- function(dataset_name, residual_dir, expr_mat, n_pc = 2L) {
+  ds_dir <- file.path(path.expand(residual_dir), dataset_name)
+  all_splits_path <- file.path(ds_dir, paste0(dataset_name, ALL_SPLITS_SUFFIX))
+
+  if (file.exists(all_splits_path)) {
+    message("  Loading Residual splits: ", all_splits_path)
+    return(readRDS(all_splits_path))
+  }
+
+  splits <- tryCatch(
+    load_splits_from_residual_dir(residual_dir, dataset_name),
+    error = function(e) NULL
+  )
+  if (!is.null(splits)) {
+    message("  Loaded Residual splits from grouped .rds files in ", ds_dir)
+    return(splits)
+  }
+
+  message("  Residual splits not found; building from pseudobulk (PC-regressed tertiles).")
+  build_residual_splits_matrix(expr_mat, n_pc = n_pc)$splits
+}
+
+load_splits_for_source <- function(source, dataset_name, expr_mat) {
+  switch(
+    source,
+    patient_zscore = load_splits_from_grouped_dir(ZSCORE_SPLITS_DIR, dataset_name),
+    rankgenes = load_splits_rankgenes(dataset_name, RANKGENES_DIR, expr_mat),
+    residual = load_splits_residual(dataset_name, RESIDUAL_SPLITS_DIR, expr_mat),
+    stop("Unknown split source: ", source)
+  )
+}
+
+plot_dispersion_scatter <- function(cmp_df, ds, source, source_label) {
+  n_genes <- nrow(cmp_df)
+  pct_split_lt <- 100 * mean(cmp_df$sd_split < cmp_df$sd_expr)
+  pct_split_gt <- 100 * mean(cmp_df$sd_split > cmp_df$sd_expr)
+  pct_split_zero <- 100 * mean(cmp_df$sd_split == 0)
+
+  subtitle <- sprintf(
+    "%d genes | split SD < expr SD: %.1f%% | split SD > expr SD: %.1f%% | split SD = 0: %.1f%%",
+    n_genes, pct_split_lt, pct_split_gt, pct_split_zero
+  )
+
+  ggplot(cmp_df, aes(x = sd_expr, y = sd_split)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey40") +
+    geom_point(alpha = 0.35, size = 1.2, color = "#4E79A7") +
+    scale_x_continuous(trans = "log1p") +
+    scale_y_continuous(trans = "log1p") +
+    labs(
+      title = paste0(ds, ": Gene dispersion — expression vs split"),
+      subtitle = subtitle,
+      x = "Pseudobulk row SD (expression space)",
+      y = "Encoded split row SD (split space)",
+      caption = source_label
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(plot.caption = element_text(size = 9, color = "grey40"))
+}
+
+run_dispersion_stats <- function(cmp_df) {
+  wt <- wilcox.test(cmp_df$sd_split, cmp_df$sd_expr, paired = TRUE, alternative = "two.sided")
+  wt_greater <- wilcox.test(cmp_df$sd_split, cmp_df$sd_expr, paired = TRUE, alternative = "greater")
+  wt_less <- wilcox.test(cmp_df$sd_split, cmp_df$sd_expr, paired = TRUE, alternative = "less")
+  ct <- suppressWarnings(cor.test(cmp_df$sd_expr, cmp_df$sd_split, method = "spearman"))
+
+  list(
+    n_genes = nrow(cmp_df),
+    median_sd_expr = median(cmp_df$sd_expr),
+    median_sd_split = median(cmp_df$sd_split),
+    median_ratio = median(cmp_df$ratio),
+    wilcox_p = wt$p.value,
+    wilcox_p_split_gt_expr = wt_greater$p.value,
+    wilcox_p_split_lt_expr = wt_less$p.value,
+    spearman_rho = unname(ct$estimate),
+    spearman_p = ct$p.value
+  )
+}
+
+dir.create(QC_OUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+for (ds in DATASETS) {
+  message("\n=== ", ds, " ===")
+
+  pb_path <- tryCatch(
+    resolve_pseudobulk_path(ds, PSEUDOBULK_DIR),
+    error = function(e) {
+      message("  Pseudobulk not found: ", conditionMessage(e))
+      NULL
+    }
+  )
+  if (is.null(pb_path)) next
+
+  message("  Loading pseudobulk: ", pb_path)
+  expr_mat <- load_gene_patient_matrix(pb_path)
+
+  for (src in split_sources) {
+    message("  Split source: ", src, " (", split_source_labels[[src]], ")")
+
+    splits_mat <- load_splits_for_source(src, ds, expr_mat)
+    if (is.null(splits_mat)) {
+      message("  No splits found for ", src, " — skipping.")
+      next
+    }
+
+    aligned <- align_matrices(expr_mat, splits_mat)
+    if (is.null(aligned)) {
+      message("  No overlapping genes/patients between pseudobulk and splits — skipping.")
+      next
+    }
+
+    message(sprintf(
+      "  Aligned: %d genes x %d patients",
+      nrow(aligned$expr), ncol(aligned$expr)
+    ))
+
+    sd_expr <- row_dispersion_expr(aligned$expr)
+    sd_split <- row_dispersion_split(aligned$splits)
+    names(sd_expr) <- rownames(aligned$expr)
+    names(sd_split) <- rownames(aligned$splits)
+
+    cmp_df <- compare_dispersion(sd_expr, sd_split)
+    if (nrow(cmp_df) == 0L) {
+      message("  No genes with valid paired dispersion — skipping.")
+      next
+    }
+
+    stats <- run_dispersion_stats(cmp_df)
+    message(sprintf(
+      paste0(
+        "  n=%d | median SD_expr=%.4f | median SD_split=%.4f | median ratio=%.4f\n",
+        "  Wilcoxon (two-sided) p=%.2e | split>expr p=%.2e | split<expr p=%.2e\n",
+        "  Spearman rho=%.3f (p=%.2e)"
+      ),
+      stats$n_genes, stats$median_sd_expr, stats$median_sd_split, stats$median_ratio,
+      stats$wilcox_p, stats$wilcox_p_split_gt_expr, stats$wilcox_p_split_lt_expr,
+      stats$spearman_rho, stats$spearman_p
+    ))
+
+    p <- plot_dispersion_scatter(cmp_df, ds, src, split_source_labels[[src]])
+    print(p)
+
+    out_png <- file.path(QC_OUT_DIR, paste0(ds, "_", src, "_expr_vs_split_dispersion.png"))
+    ggsave(out_png, p, width = 8, height = 6, dpi = 300)
+    message("  Saved: ", out_png)
+
+    out_csv <- file.path(QC_OUT_DIR, paste0(ds, "_", src, "_expr_vs_split_dispersion.csv"))
+    write.csv(cmp_df, out_csv, row.names = FALSE)
+  }
+}
+```
+
+# Gene patient-wise profiles: PCA in expression vs split space
+
+Each **gene** is a point in patient space (dimensions = patients). Rows are row z-scored so profiles reflect **relative** highs/lows across patients, not absolute expression.
+
+- **Expression PCA:** which genes have similar pseudobulk patterns across patients.
+- **Split PCA:** which genes assign LOW/MID/HIGH to similar patients.
+- **Profile correlation** (per gene): correlation between row z-scored expression and row z-scored encoded splits. **Low correlation** → split labels do not track that gene's expression patient pattern (less informative in split space for that gene).
+
+```{r gene-profile-pca-expr-vs-split, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# ── Config (same split sources as dispersion section) ─────────────────────────
+SPLIT_SOURCE <- "both"
+DATASETS <- c("Puram_HNSC", "Choi_HNSC", "Kurten_HNSC", "Bill_HNSC")
+PSEUDOBULK_DIR <- path.expand("~/Thesis/CCC/outputs/RData_objects/pseudobulk_matrix")
+ZSCORE_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-patients-zscore/Patient-ZScore")
+RANKGENES_DIR <- path.expand("~/CCC-PreProcess/results-RankGenes")
+RESIDUAL_SPLITS_DIR <- path.expand("~/CCC-PreProcess/results-Residual")
+PROFILE_PCA_DIR <- path.expand("~/Thesis/CCC/outputs/plots/QC/gene_profile_pca")
+N_PC <- 2L
+MIN_PATIENTS <- 5L
+MAX_PATIENT_NA_FRAC <- 0.25   # drop patient if >25% of genes are NA (incl. all-NA columns)
+LABEL_LOW_COR_QUANTILE <- 0.10   # highlight bottom 10% expr–split profile correlation
+N_LABEL_GENES <- 12L
+
+split_sources <- switch(
+  SPLIT_SOURCE,
+  patient_zscore = "patient_zscore",
+  rankgenes = "rankgenes",
+  residual = "residual",
+  both = c("patient_zscore", "rankgenes"),
+  all = c("patient_zscore", "rankgenes", "residual"),
+  stop("SPLIT_SOURCE must be 'patient_zscore', 'rankgenes', 'residual', 'both', or 'all'.")
+)
+
+split_source_labels <- c(
+  patient_zscore = "Patient-ZScore tertiles",
+  rankgenes = "RankGenes tertiles (within-patient rank)",
+  residual = "Residual tertiles (PC-regressed pseudobulk)"
+)
+
+script_dir <- tryCatch(
+  dirname(knitr::current_input(dir = TRUE)),
+  error = function(e) NULL
+)
+if (is.null(script_dir) || !nzchar(script_dir)) {
+  script_dir <- normalizePath(".", winslash = "/")
+}
+source(file.path(script_dir, "rankGenesSplitUtils.R"))
+
+LABEL_NUM <- c(LOW = 1, MID = 2, HIGH = 3)
+
+encode_splits <- function(splits_chr) {
+  out <- matrix(NA_real_, nrow = nrow(splits_chr), ncol = ncol(splits_chr),
+                dimnames = dimnames(splits_chr))
+  for (lev in names(LABEL_NUM)) {
+    out[splits_chr == lev] <- LABEL_NUM[[lev]]
+  }
+  storage.mode(out) <- "double"
+  out
+}
+
+align_matrices <- function(expr_mat, splits_mat) {
+  genes <- intersect(rownames(expr_mat), rownames(splits_mat))
+  patients <- intersect(colnames(expr_mat), colnames(splits_mat))
+  if (length(genes) == 0L || length(patients) == 0L) return(NULL)
+  list(
+    expr = expr_mat[genes, patients, drop = FALSE],
+    splits = splits_mat[genes, patients, drop = FALSE]
+  )
+}
+
+row_zscore_matrix <- function(mat) {
+  if (requireNamespace("matrixStats", quietly = TRUE)) {
+    rm <- matrixStats::rowMeans2(mat, na.rm = TRUE)
+    rsd <- matrixStats::rowSds(mat, na.rm = TRUE)
+    rsd[!is.finite(rsd) | rsd == 0] <- NA_real_
+    z <- sweep(mat, 1, rm, FUN = "-")
+    z <- sweep(z, 1, rsd, FUN = "/")
+    return(z)
+  }
+  t(scale(t(mat)))
+}
+
+genes_with_usable_rows <- function(mat, min_patients = MIN_PATIENTS) {
+  apply(mat, 1, function(r) {
+    ok <- is.finite(r)
+    sum(ok) >= min_patients && stats::sd(r[ok]) > 0
+  })
+}
+
+# Drop patients (columns) that are all-NA or mostly missing across genes.
+drop_sparse_patients <- function(mat, max_na_frac = MAX_PATIENT_NA_FRAC,
+                               min_patients = MIN_PATIENTS, label = "matrix") {
+  if (ncol(mat) == 0L) return(mat)
+
+  na_frac <- colMeans(!is.finite(mat))
+  keep <- na_frac < max_na_frac
+  dropped <- colnames(mat)[!keep]
+
+  if (length(dropped) > 0L) {
+    message(sprintf(
+      "  Dropped %d patient(s) from %s (NA fraction >= %.0f%%): %s",
+      length(dropped), label, 100 * max_na_frac,
+      paste(dropped, collapse = ", ")
+    ))
+  }
+
+  mat <- mat[, keep, drop = FALSE]
+  if (ncol(mat) < min_patients) {
+    warning(
+      "Only ", ncol(mat), " patient(s) left in ", label,
+      " after NA filtering (need >= ", min_patients, ")."
+    )
+  }
+  mat
+}
+
+# Keep patients that pass coverage in both z-matrices (expr + split).
+drop_sparse_patients_pair <- function(z_expr, z_split,
+                                    max_na_frac = MAX_PATIENT_NA_FRAC,
+                                    min_patients = MIN_PATIENTS) {
+  patients <- intersect(colnames(z_expr), colnames(z_split))
+  if (length(patients) == 0L) {
+    stop("No shared patients between expression and split matrices.")
+  }
+
+  na_expr <- colMeans(!is.finite(z_expr[, patients, drop = FALSE]))
+  na_split <- colMeans(!is.finite(z_split[, patients, drop = FALSE]))
+  keep <- (na_expr < max_na_frac) & (na_split < max_na_frac)
+  dropped <- patients[!keep]
+
+  if (length(dropped) > 0L) {
+    message(sprintf(
+      "  Dropped %d patient(s) from paired PCA (NA in expr and/or split): %s",
+      length(dropped), paste(dropped, collapse = ", ")
+    ))
+  }
+
+  patients <- patients[keep]
+  if (length(patients) < min_patients) {
+    stop(
+      "Fewer than ", min_patients, " patients after paired NA filtering (",
+      length(patients), " left)."
+    )
+  }
+
+  list(
+    expr = z_expr[, patients, drop = FALSE],
+    split = z_split[, patients, drop = FALSE],
+    patients = patients
+  )
+}
+
+# Subset genes/patients for PCA; impute remaining NA with 0 (neutral z-score) if needed.
+prepare_matrix_for_pca <- function(z_mat, max_na_frac = MAX_PATIENT_NA_FRAC,
+                                   min_patients = MIN_PATIENTS,
+                                   impute_residual_na = TRUE, label = "PCA") {
+  z <- drop_sparse_patients(z_mat, max_na_frac, min_patients, label)
+
+  keep <- genes_with_usable_rows(z, min_patients)
+  z <- z[keep, , drop = FALSE]
+
+  gene_ok <- apply(z, 1, function(r) all(is.finite(r)) && stats::sd(r) > 0)
+  z_complete <- z[gene_ok, , drop = FALSE]
+
+  if (nrow(z_complete) >= 3L) {
+    return(list(z = z_complete, imputed = FALSE, n_genes = nrow(z_complete)))
+  }
+
+  if (!impute_residual_na) {
+    stop("Fewer than 3 genes with complete rows after patient filtering for ", label, ".")
+  }
+
+  n_imputed <- sum(!is.finite(z))
+  z[!is.finite(z)] <- 0
+  gene_ok <- apply(z, 1, function(r) stats::sd(r) > 0)
+  z <- z[gene_ok, , drop = FALSE]
+
+  if (nrow(z) < 3L) {
+    stop("Fewer than 3 genes with usable z-scores for ", label, " after imputation.")
+  }
+
+  if (n_imputed > 0L) {
+    message(sprintf(
+      "  %s: imputed %d NA cell(s) with 0 (neutral z-score); %d genes for PCA.",
+      label, n_imputed, nrow(z)
+    ))
+  }
+
+  list(z = z, imputed = TRUE, n_genes = nrow(z))
+}
+
+pca_genes <- function(z_mat, n_pc = N_PC, label = "PCA") {
+  prep <- prepare_matrix_for_pca(z_mat, label = label)
+  z <- prep$z
+
+  pc <- stats::prcomp(z, center = TRUE, scale. = FALSE)
+  n_pc <- min(n_pc, ncol(pc$x))
+  var_expl <- (pc$sdev^2) / sum(pc$sdev^2)
+  list(
+    coords = pc$x[, seq_len(n_pc), drop = FALSE],
+    var_expl = var_expl,
+    rotation = pc$rotation[, seq_len(n_pc), drop = FALSE],
+    n_genes = nrow(z),
+    n_patients = ncol(z),
+    imputed = prep$imputed
+  )
+}
+
+row_profile_correlation <- function(z_expr, z_split) {
+  genes <- intersect(rownames(z_expr), rownames(z_split))
+  vapply(genes, function(g) {
+    xe <- z_expr[g, ]
+    xs <- z_split[g, ]
+    ok <- is.finite(xe) & is.finite(xs)
+    if (sum(ok) < 3L) return(NA_real_)
+    suppressWarnings(stats::cor(xe[ok], xs[ok], method = "pearson"))
+  }, numeric(1))
+}
+
+load_splits_from_grouped_dir <- function(base_dir, dataset_name) {
+  ds_dir <- file.path(path.expand(base_dir), dataset_name)
+  if (!dir.exists(ds_dir)) return(NULL)
+  files <- list.files(ds_dir, pattern = paste0("_", dataset_name, "_grouped\\.rds$"),
+                      full.names = TRUE)
+  if (length(files) == 0L) return(NULL)
+  patients <- NULL
+  split_rows <- list()
+  for (f in files) {
+    df <- tryCatch(readRDS(f), error = function(e) NULL)
+    if (is.null(df) || !is.data.frame(df)) next
+    exp_col <- grep("_exp$", colnames(df), ignore.case = TRUE, value = TRUE)[1]
+    if (is.na(exp_col)) next
+    gene <- sub(paste0("_", dataset_name, "_grouped\\.rds$"), "", basename(f))
+    if (is.null(patients)) patients <- as.character(df$patient_id)
+    vec <- setNames(as.character(df[[exp_col]]), as.character(df$patient_id))
+    split_rows[[gene]] <- vec[patients]
+  }
+  if (length(split_rows) == 0L) return(NULL)
+  genes_found <- names(split_rows)
+  splits <- matrix(NA_character_, nrow = length(genes_found), ncol = length(patients),
+                   dimnames = list(genes_found, patients))
+  for (g in genes_found) splits[g, ] <- split_rows[[g]]
+  splits
+}
+
+load_splits_rankgenes <- function(dataset_name, rankgenes_dir, expr_mat) {
+  ds_dir <- file.path(path.expand(rankgenes_dir), dataset_name)
+  all_splits_path <- file.path(ds_dir, paste0(dataset_name, ALL_SPLITS_SUFFIX))
+  if (file.exists(all_splits_path)) return(readRDS(all_splits_path))
+  splits <- tryCatch(
+    load_splits_from_rankgenes_dir(rankgenes_dir, dataset_name),
+    error = function(e) NULL
+  )
+  if (!is.null(splits)) return(splits)
+  rank_mat <- compute_rank_matrix(expr_mat)
+  build_patient_splits_matrix(expr_mat, rank_mat = rank_mat)
+}
+
+load_splits_residual <- function(dataset_name, residual_dir, expr_mat, n_pc = 2L) {
+  ds_dir <- file.path(path.expand(residual_dir), dataset_name)
+  all_splits_path <- file.path(ds_dir, paste0(dataset_name, ALL_SPLITS_SUFFIX))
+  if (file.exists(all_splits_path)) return(readRDS(all_splits_path))
+  splits <- tryCatch(
+    load_splits_from_residual_dir(residual_dir, dataset_name),
+    error = function(e) NULL
+  )
+  if (!is.null(splits)) return(splits)
+  build_residual_splits_matrix(expr_mat, n_pc = n_pc)$splits
+}
+
+load_splits_for_source <- function(source, dataset_name, expr_mat) {
+  switch(
+    source,
+    patient_zscore = load_splits_from_grouped_dir(ZSCORE_SPLITS_DIR, dataset_name),
+    rankgenes = load_splits_rankgenes(dataset_name, RANKGENES_DIR, expr_mat),
+    residual = load_splits_residual(dataset_name, RESIDUAL_SPLITS_DIR, expr_mat),
+    stop("Unknown split source: ", source)
+  )
+}
+
+build_profile_pca_df <- function(pca_res, space_label) {
+  df <- as.data.frame(pca_res$coords)
+  colnames(df) <- paste0("PC", seq_len(ncol(df)))
+  df$gene <- rownames(pca_res$coords)
+  df$space <- space_label
+  df$var_pc1 <- round(100 * pca_res$var_expl[1], 1)
+  if (length(pca_res$var_expl) >= 2L) {
+    df$var_pc2 <- round(100 * pca_res$var_expl[2], 1)
+  } else {
+    df$var_pc2 <- NA_real_
+  }
+  df
+}
+
+plot_profile_pca <- function(plot_df, df_expr, df_split, ds, source_label, cor_col = "profile_cor") {
+  low_cor_thr <- stats::quantile(plot_df[[cor_col]], probs = LABEL_LOW_COR_QUANTILE, na.rm = TRUE)
+  plot_df <- plot_df %>%
+    dplyr::mutate(
+      low_split_informativeness = !is.na(.data[[cor_col]]) &
+        .data[[cor_col]] <= low_cor_thr
+    )
+
+  label_df <- plot_df %>%
+    dplyr::filter(.data$space == "Expression", .data$low_split_informativeness) %>%
+    dplyr::arrange(.data[[cor_col]]) %>%
+    dplyr::slice_head(n = N_LABEL_GENES)
+
+  p_expr <- ggplot(
+    dplyr::filter(plot_df, .data$space == "Expression"),
+    aes(x = PC1, y = PC2, color = .data[[cor_col]])
+  ) +
+    geom_point(alpha = 0.45, size = 1.4) +
+    geom_text(
+      data = label_df, aes(label = gene),
+      size = 2.5, vjust = -0.6, check_overlap = TRUE, show.legend = FALSE
+    ) +
+    scale_color_viridis_c(option = "magma", name = "Expr–split\ncorrelation", na.value = "grey80") +
+    labs(
+      title = "Expression space",
+      subtitle = sprintf("PC1 %.1f%% | PC2 %.1f%% variance", df_expr$var_pc1[1], df_expr$var_pc2[1]),
+      x = "PC1", y = "PC2"
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(legend.position = "bottom")
+
+  p_split <- ggplot(
+    dplyr::filter(plot_df, .data$space == "Split"),
+    aes(x = PC1, y = PC2, color = .data[[cor_col]])
+  ) +
+    geom_point(alpha = 0.45, size = 1.4) +
+    scale_color_viridis_c(option = "magma", name = "Expr–split\ncorrelation", na.value = "grey80") +
+    labs(
+      title = "Split space",
+      subtitle = sprintf("PC1 %.1f%% | PC2 %.1f%% variance", df_split$var_pc1[1], df_split$var_pc2[1]),
+      x = "PC1", y = "PC2"
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(legend.position = "bottom")
+
+  (p_expr | p_split) +
+    plot_annotation(
+      title = paste0(ds, ": Gene patient-wise profiles (row z-scored)"),
+      subtitle = paste0(
+        source_label, " | dark labels = bottom ", 100 * LABEL_LOW_COR_QUANTILE,
+        "% expr–split correlation (least informative splits)"
+      ),
+      theme = theme(plot.title = element_text(face = "bold", size = 12))
+    )
+}
+
+plot_profile_cor_hist <- function(metrics_df, ds, source_label) {
+  ggplot(metrics_df, aes(x = profile_cor)) +
+    geom_histogram(bins = 40, fill = "#4E79A7", color = "white", linewidth = 0.2) +
+    geom_vline(
+      xintercept = stats::quantile(metrics_df$profile_cor, LABEL_LOW_COR_QUANTILE, na.rm = TRUE),
+      linetype = "dashed", color = "#E15759"
+    ) +
+    labs(
+      title = paste0(ds, ": Expression vs split patient-profile correlation"),
+      subtitle = source_label,
+      x = "Per-gene correlation (row z expr vs row z split)",
+      y = "Number of genes"
+    ) +
+    theme_minimal(base_size = 11)
+}
+
+dir.create(PROFILE_PCA_DIR, recursive = TRUE, showWarnings = FALSE)
+
+for (ds in DATASETS) {
+  message("\n=== Profile PCA: ", ds, " ===")
+
+  pb_path <- tryCatch(
+    resolve_pseudobulk_path(ds, PSEUDOBULK_DIR),
+    error = function(e) NULL
+  )
+  if (is.null(pb_path)) next
+
+  expr_mat <- load_gene_patient_matrix(pb_path)
+
+  for (src in split_sources) {
+    message("  Source: ", src)
+
+    splits_mat <- load_splits_for_source(src, ds, expr_mat)
+    if (is.null(splits_mat)) next
+
+    aligned <- align_matrices(expr_mat, splits_mat)
+    if (is.null(aligned)) next
+
+    # Remove sparse / all-NA patients before z-scoring (same patients for expr + splits)
+    aligned$expr <- drop_sparse_patients(aligned$expr, label = paste0(ds, " expression"))
+    if (ncol(aligned$expr) < MIN_PATIENTS) {
+      message("  Too few patients after expression NA filter — skipping.")
+      next
+    }
+    aligned$splits <- aligned$splits[, colnames(aligned$expr), drop = FALSE]
+
+    split_num <- encode_splits(aligned$splits)
+    z_expr <- row_zscore_matrix(aligned$expr)
+    z_split <- row_zscore_matrix(split_num)
+
+    z_pair <- drop_sparse_patients_pair(z_expr, z_split)
+    z_expr <- z_pair$expr
+    z_split <- z_pair$split
+    message(sprintf("  PCA / profiles use %d patients: %s",
+                    length(z_pair$patients), paste(z_pair$patients, collapse = ", ")))
+
+    profile_cor <- row_profile_correlation(z_expr, z_split)
+    profile_cor <- profile_cor[is.finite(profile_cor)]
+
+    pca_expr <- pca_genes(z_expr, label = paste0(ds, " expression"))
+    pca_split <- pca_genes(z_split, label = paste0(ds, " split"))
+
+    df_expr <- build_profile_pca_df(pca_expr, "Expression")
+    df_split <- build_profile_pca_df(pca_split, "Split")
+    plot_df <- dplyr::bind_rows(df_expr, df_split) %>%
+      dplyr::left_join(
+        data.frame(gene = names(profile_cor), profile_cor = unname(profile_cor),
+                   stringsAsFactors = FALSE),
+        by = "gene"
+      )
+
+    metrics_df <- data.frame(
+      gene = names(profile_cor),
+      profile_cor = unname(profile_cor),
+      PC1_expr = df_expr$PC1[match(names(profile_cor), df_expr$gene)],
+      PC2_expr = df_expr$PC2[match(names(profile_cor), df_expr$gene)],
+      PC1_split = df_split$PC1[match(names(profile_cor), df_split$gene)],
+      PC2_split = df_split$PC2[match(names(profile_cor), df_split$gene)],
+      stringsAsFactors = FALSE
+    ) %>%
+      dplyr::mutate(
+        pc_dist = sqrt((PC1_expr - PC1_split)^2 + (PC2_expr - PC2_split)^2),
+        low_split_informativeness = profile_cor <= stats::quantile(
+          profile_cor, LABEL_LOW_COR_QUANTILE, na.rm = TRUE
+        )
+      )
+
+    message(sprintf(
+      "  %d genes | median expr–split cor = %.3f | %.1f%% below Q%.0f",
+      nrow(metrics_df),
+      median(metrics_df$profile_cor),
+      100 * mean(metrics_df$low_split_informativeness),
+      100 * LABEL_LOW_COR_QUANTILE
+    ))
+
+    p_pca <- plot_profile_pca(
+      plot_df, df_expr, df_split, ds, split_source_labels[[src]]
+    )
+    print(p_pca)
+
+    p_hist <- plot_profile_cor_hist(metrics_df, ds, split_source_labels[[src]])
+    print(p_hist)
+
+    prefix <- file.path(PROFILE_PCA_DIR, paste0(ds, "_", src))
+    ggsave(paste0(prefix, "_gene_profile_pca.png"), p_pca, width = 14, height = 6, dpi = 300)
+    ggsave(paste0(prefix, "_profile_cor_hist.png"), p_hist, width = 8, height = 5, dpi = 300)
+    write.csv(metrics_df, paste0(prefix, "_gene_profile_metrics.csv"), row.names = FALSE)
+    write.csv(plot_df, paste0(prefix, "_gene_profile_pca_coords.csv"), row.names = FALSE)
+    message("  Saved outputs under ", PROFILE_PCA_DIR)
+  }
+}
+```

@@ -1,0 +1,16 @@
+# CTLA4 patient distribution (HNSC Atlas)
+
+**Note:** This chunk calls `helpers$add_malignant_gene_group`, which is not defined in the preprocessing-checks setup. Source `PROJECT_SCRIPTS/utils/Utils.R` (or your cluster `helpers` object) before knitting this section, or skip it.
+
+```{r ctla4-atlas-sanity, eval=FALSE}
+merged.results <- helpers$add_malignant_gene_group(
+  seurat_obj = HNSC.Atlas,
+  gene = "CTLA4",
+  cell_type_col = "Cell_Type",
+  assay = "RNA"
+)
+
+merged.results.ps <- merged.results$patient_summary
+counts_table <- table(merged.results.ps$CTLA4_EXP, merged.results.ps$Project)
+print(counts_table)
+```

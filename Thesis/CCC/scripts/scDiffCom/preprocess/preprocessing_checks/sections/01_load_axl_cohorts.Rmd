@@ -1,0 +1,40 @@
+# Load H&N AXL cohorts
+
+```{r load-axl-cohorts}
+# Qian.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Qian2020_Breast_step4.RDS",
+#                                             ps_path = "~/outputs/Qian2020_Breast_step4/AXL_Qian2020_Breast_step4_grouped.rds",
+#                                             gene_col ="AXL_EXP",
+#                                             patient_col_in_seurat = "ident")
+#
+# Chan.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Chan2021_Lung_step4.RDS",
+#                                             ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Chan2021_Lung_step4/AXL_Chan2021_Lung_step4_grouped.rds",
+#                                             gene_col ="AXL_EXP",
+#                                             patient_col_in_seurat = "ident")
+#
+# Laughney.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Laughney2020_Lung_step4.RDS",
+#                                             ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Laughney2020_Lung_step4/AXL_Laughney2020_Lung_step4_grouped.rds",
+#                                             gene_col ="AXL_EXP",
+#                                             patient_col_in_seurat = "ident")
+#
+# Bassez.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Bassez2021_Breast_step4.RDS",
+#                                             ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Bassez2021_Breast_step4/AXL_Bassez2021_Breast_step4_grouped.rds",
+#                                             gene_col ="AXL_EXP",
+#                                             patient_col_in_seurat = "ident")
+
+Bill_HNSC.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Bill_HNSC.RData",
+                                              ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Bill_HNSC/AXL_Bill_HNSC_grouped.rds",
+                                              gene_col ="AXL_EXP",
+                                              patient_col_in_seurat = "Patient")
+Choi_HNSC.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Choi_HNSC.RData",
+                                              ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Choi_HNSC/AXL_Choi_HNSC_grouped.rds",
+                                              gene_col ="AXL_EXP",
+                                              patient_col_in_seurat = "Patient")
+Kurten_HNSC.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Kurten_HNSC.RData",
+                                              ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Kurten_HNSC/AXL_Kurten_HNSC_grouped.rds",
+                                              gene_col ="AXL_EXP",
+                                              patient_col_in_seurat = "Patient")
+Puram_HNSC.AXL <- Load.Seurat.With.Patients.Data(ds_path = "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects/Puram_HNSC.RData",
+                                              ps_path = "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results/Puram_HNSC/AXL_Puram_HNSC_grouped.rds",
+                                              gene_col ="AXL_EXP",
+                                              patient_col_in_seurat = "Patient")
+```

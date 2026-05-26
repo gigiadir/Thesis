@@ -102,6 +102,10 @@ Thesis/Figure 1 - Bulk/outputs
 !Thesis/CCC/scripts/scDiffCom/post_analysis/R/
 !Thesis/CCC/scripts/scDiffCom/post_analysis/R/**
 
+# Preprocessing-checks R helpers (override global R/ ignore)
+!Thesis/CCC/scripts/scDiffCom/preprocess/preprocessing_checks/R/
+!Thesis/CCC/scripts/scDiffCom/preprocess/preprocessing_checks/R/**
+
 # Generated qsub manifest (regenerate via scDiffCom/pipeline/Main-scDiffComPipeline.R)
 Thesis/CCC/scripts/scDiffCom/pipeline/submit_scDiffCom_jobs.sh
 Thesis/CCC/scripts/scDiffCom/preprocess/submit_jobs.sh
