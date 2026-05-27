@@ -1,0 +1,3 @@
+"set_name","n_genes","n_pairs","mean_distance","median_distance","method"
+"set1",3,3,1.0402643511961,0.782275290166947,"TestMethod"
+"set2",3,3,1.04800180825894,1.05496607506631,"TestMethod"
