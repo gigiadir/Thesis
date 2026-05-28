@@ -4,7 +4,7 @@
 # Canonical Thesis copy: scDiffCom/pipeline/scDiffComPipeline.R (see ../../SYNC_TO_SCRIPTS.md).
 script_path <- normalizePath(path.expand("~/Scripts/scDiffComPipeline.R"), mustWork = FALSE)
 preprocess_results_path <- "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-PreProcess/results-RankGenes"
-base_output_path <- "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-scDiffCom/results/split-by-rank-genes"
+base_output_path <- "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-scDiffCom/results/split-by-rank-genes-v2"
 
 # New data location
 new_data_dir <- "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects"
@@ -74,7 +74,7 @@ for (current_gene in genes) {
     
     # qsub: bash runs wrapper (conda env + Rscript); no -V so the job does not inherit the submit shell env
     cmd <- sprintf(
-      "qsub -q intel_all.q -S /bin/bash -cwd -N %s -o %s -e %s %s --gene %s --dataset_path %s --patient_summary_path %s --column_id %s --cell_type_col %s --iterations 10000",
+      "qsub -q intel_all.q -S /bin/bash -cwd -N %s -o %s -e %s %s --gene %s --dataset_path %s --patient_summary_path %s --column_id %s --cell_type_col %s --output_dir %s --iterations 10000",
       job_name,
       shQuote(logs_path, type = "sh"),
       shQuote(logs_path, type = "sh"),
@@ -83,7 +83,8 @@ for (current_gene in genes) {
       shQuote(current_path, type = "sh"),
       shQuote(summary_path, type = "sh"),
       shQuote(current_col, type = "sh"),
-      shQuote(current_ct, type = "sh")
+      shQuote(current_ct, type = "sh"),
+      shQuote(base_output_path, type = "sh")
     )
     
     all_commands <- c(all_commands, cmd)

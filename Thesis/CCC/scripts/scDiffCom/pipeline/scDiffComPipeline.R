@@ -28,6 +28,7 @@ option_list <- list(
   make_option("--dataset_path", type="character", default=NULL, help="Path to RAW Seurat RDS file", metavar="character"),
   make_option("--patient_summary_path", type="character", default=NULL, help="Path to the patient_summary RDS (output from the previous script)", metavar="character"),
   make_option("--column_id", type="character", default=NULL, help="The metadata column in Seurat that matches patient_id in summary (e.g. sample, orig.ident)", metavar="character"),
+  make_option("--output_dir", type="character", default=NULL, help="Base output directory for scDiffCom results", metavar="character"),
   make_option("--cell_type_col", type="character", default="cell_type", help="Metadata column for cell type [default %default]", metavar="character"),
   make_option("--iterations", type="integer", default=10000, help="scDiffCom iterations [default %default]")
 )
@@ -47,6 +48,7 @@ if (is.null(opt$dataset_path) || !file.exists(opt$dataset_path)) stop("Error: da
 if (is.null(opt$patient_summary_path) || !file.exists(opt$patient_summary_path)) stop("Error: patient_summary_path is invalid.")
 if (is.null(opt$gene)) stop("Error: --gene parameter is required.")
 if (is.null(opt$column_id)) stop("Error: --column_id is required to map patients to cells.")
+if (is.null(opt$output_dir) || opt$output_dir == "") stop("Error: --output_dir is required and cannot be empty.")
 
 GENE_EXP_COL <- paste0(opt$gene, "_EXP")
 
@@ -126,7 +128,7 @@ helpers <- list(
 )
 
 # --- 4. Main Execution ---
-OUTPUT_DIR <- "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-scDiffCom/results/split-by-rank-genes"
+OUTPUT_DIR <- opt$output_dir
 if (!dir.exists(OUTPUT_DIR)) dir.create(OUTPUT_DIR, recursive = TRUE)
 dataset_name <- tools::file_path_sans_ext(basename(opt$dataset_path))
 dataset_output_dir <- file.path(OUTPUT_DIR, dataset_name)
