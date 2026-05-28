@@ -128,6 +128,9 @@ helpers <- list(
 # --- 4. Main Execution ---
 OUTPUT_DIR <- "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-scDiffCom/results/split-by-rank-genes"
 if (!dir.exists(OUTPUT_DIR)) dir.create(OUTPUT_DIR, recursive = TRUE)
+dataset_name <- tools::file_path_sans_ext(basename(opt$dataset_path))
+dataset_output_dir <- file.path(OUTPUT_DIR, dataset_name)
+if (!dir.exists(dataset_output_dir)) dir.create(dataset_output_dir, recursive = TRUE)
 
 tryCatch({
   # 1. Create the merged object using the helper
@@ -148,8 +151,7 @@ tryCatch({
   result_obj <- helpers$run_scdiffcom_for_seurat(seurat_obj)
   
   # 4. Save
-  file_base <- tools::file_path_sans_ext(basename(opt$dataset_path))
-  out_path <- file.path(OUTPUT_DIR, paste0(opt$gene, "_", file_base, "_scDiffCom.rds"))
+  out_path <- file.path(dataset_output_dir, paste0(opt$gene, "_", dataset_name, "_scDiffCom.rds"))
   
   saveRDS(result_obj, out_path)
   message("✓ Success! Saved to: ", out_path)
