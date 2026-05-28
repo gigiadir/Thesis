@@ -85,6 +85,9 @@ conda-environments/
 
 # Large / local preprocessing tree (not tracked as code here)
 CCC-PreProcess/
+CCC-scDiffCom/
+scObject/*
+scObjects/*
 
 # Thesis analysis outputs / Dropbox symlinks (with or without trailing slash)
 Thesis/CCC/outputs
