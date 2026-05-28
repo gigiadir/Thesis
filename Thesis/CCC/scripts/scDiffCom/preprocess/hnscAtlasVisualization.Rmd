@@ -1,0 +1,10 @@
+---
+title: "hnscAtlasVisualization"
+output: html_document
+---
+
+```{r}
+my.save.RData("HNSCC.Atlas", "~/scObjects", is.load.obj = T)
+my.save.RData("Bill_HNSC", "~/scObjects", is.load.obj = T)
+```
+

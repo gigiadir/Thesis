@@ -7,13 +7,13 @@
 #   2. Rscript scDiffCom-Preprocess-RankGenes.R --dataset_name Kurten_HNSC
 #   3. Rscript analyzeGeneSplitJaccard.R --dataset_name Kurten_HNSC --mode panel
 #
-# Requires: optparse, pheatmap, ggplot2, ggrepel, ggforce
+# Requires: optparse, pheatmap, ggplot2, ggrepel, ggforce, uwot (UMAP)
 # R libraries (if packages missing from plain Rscript):
 #   export R_LIBS_SITE=/gpfs0/bgu-ofircohen/group/R_packages/R_4.5.0
 #   or uncomment source("/gpfs0/bgu-ofircohen/group/groupRprofile") in ~/.Rprofile
 #
 # Modes:
-#   panel — 123-gene scDiffCom panel: Jaccard matrix + heatmap + MDS + split-profile PCA
+#   panel — 123-gene scDiffCom panel: Jaccard matrix + heatmap + MDS + UMAP + split-profile PCA
 #   all   — all genes: duplicate-split clusters; full matrix only if <= max_genes_full_matrix
 
 suppressPackageStartupMessages({
@@ -70,6 +70,33 @@ prepare_split_profile_matrix <- function(L) {
   L <- L[keep_genes, , drop = FALSE]
   z <- row_zscore_matrix(L)
   z
+}
+
+run_gene_umap <- function(d, n_neighbors = 15L, min_dist = 0.1, n_dims_mds = 10L) {
+  if (!requireNamespace("uwot", quietly = TRUE)) {
+    stop("Package 'uwot' is required for UMAP. Install with install.packages(\"uwot\").")
+  }
+  n <- attr(d, "Size")
+  if (n < 3L) {
+    return(NULL)
+  }
+  k_mds <- min(as.integer(n_dims_mds), n - 1L)
+  k_mds <- max(2L, k_mds)
+  X <- stats::cmdscale(d, k = k_mds)
+  if (ncol(X) < 2L) {
+    return(NULL)
+  }
+  k_eff <- max(2L, min(as.integer(n_neighbors), n - 1L))
+  coords <- uwot::umap(
+    X,
+    n_neighbors = k_eff,
+    min_dist = min_dist,
+    n_components = 2L,
+    seed = 42L,
+    verbose = FALSE
+  )
+  colnames(coords) <- c("UMAP1", "UMAP2")
+  coords
 }
 
 run_gene_pca <- function(z_mat, n_pc = 2L) {
@@ -324,7 +351,13 @@ option_list <- list(
   make_option("--top_pairs", type = "integer", default = 100L,
               help = "Number of top similar gene pairs to export [default %default]"),
   make_option("--edge_jaccard_min", type = "double", default = 0.95,
-              help = "Draw edges between gene pairs with Jaccard >= this [default %default]")
+              help = "Draw edges between gene pairs with Jaccard >= this [default %default]"),
+  make_option("--umap_n_neighbors", type = "integer", default = 15L,
+              help = "UMAP n_neighbors (capped at G-1) [default %default]"),
+  make_option("--umap_min_dist", type = "double", default = 0.1,
+              help = "UMAP min_dist [default %default]"),
+  make_option("--skip_umap", action = "store_true", default = FALSE,
+              help = "Skip UMAP embedding and plot [default %default]")
 )
 
 opt <- optparse::parse_args(optparse::OptionParser(option_list = option_list))
@@ -532,6 +565,46 @@ if (compute_full_matrix) {
         out_path = file.path(out_dir, "jaccard_mds.png")
       )
       message("Wrote MDS plot: ", file.path(out_dir, "jaccard_mds.png"))
+    }
+
+    if (!isTRUE(opt$skip_umap) && G >= 3L) {
+      umap_coords <- run_gene_umap(
+        d,
+        n_neighbors = opt$umap_n_neighbors,
+        min_dist = opt$umap_min_dist
+      )
+      if (!is.null(umap_coords)) {
+        umap_embed <- build_embedding_df(
+          umap_coords, 1L, 2L, genes, J, dup_groups
+        )
+        umap_out <- umap_embed
+        colnames(umap_out)[colnames(umap_out) == "x"] <- "UMAP1"
+        colnames(umap_out)[colnames(umap_out) == "y"] <- "UMAP2"
+        umap_out$umap_n_neighbors <- max(2L, min(opt$umap_n_neighbors, G - 1L))
+        umap_out$umap_min_dist <- opt$umap_min_dist
+        saveRDS(umap_out, file.path(out_dir, "jaccard_umap_coords.rds"))
+
+        umap_subtitle <- paste(
+          "UMAP of MDS coordinates from Jaccard dissimilarity (1 - similarity);",
+          sprintf("n_neighbors=%d, min_dist=%s",
+                  umap_out$umap_n_neighbors[[1]], opt$umap_min_dist),
+          "| nearby = similar patient partitions"
+        )
+
+        plot_gene_embedding(
+          embed_df = umap_embed,
+          edge_df = edge_df,
+          dup_groups = dup_groups,
+          title = paste0(
+            opt$dataset_name, " \u2013 Gene split similarity map (UMAP, n=", G, ")"
+          ),
+          subtitle = umap_subtitle,
+          xlab = "UMAP1",
+          ylab = "UMAP2",
+          out_path = file.path(out_dir, "jaccard_umap.png")
+        )
+        message("Wrote UMAP plot: ", file.path(out_dir, "jaccard_umap.png"))
+      }
     }
 
     z_mat <- prepare_split_profile_matrix(L)

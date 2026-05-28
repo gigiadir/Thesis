@@ -39,3 +39,32 @@ Summaries: `~/Thesis/CCC/outputs/QC/split_equivalence/expression_quantile_equiva
 - Different gene sets (legacy runs one gene per job; pseudobulk is full matrix).
 
 If `max_abs_mean_expr_diff` is near zero but labels differ, check quantile tie-breaking; if diffs are large, filtering or cell-type definitions differ.
+
+## Split-rule concordance (Figure 3.3)
+
+Pairwise agreement of **HIGH / LOW** labels between partition rules, summarized as the mean fraction of concordant extreme-labeled patients across driver-panel genes (default: 123-gene scDiffCom panel).
+
+**Metric (per gene, rule pair A vs B):**
+
+- Comparable patients: both rules assign `LOW` or `HIGH` (exclude `MID` and missing).
+- Per-gene score: fraction of comparable patients with the same extreme label.
+- Matrix entry: mean of per-gene scores across aligned panel genes.
+
+**Prerequisites:** pseudobulk plus all four preprocess outputs for the cohort:
+
+```bash
+Rscript createPseudobulkMatrix.R --dataset_name Kurten_HNSC
+Rscript scDiffCom-Preprocess-ExpressionQuantile.R --dataset_name Kurten_HNSC
+Rscript scDiffCom-Preprocess-RankGenes.R --dataset_name Kurten_HNSC
+Rscript scDiffCom-Preprocess-Residual.R --dataset_name Kurten_HNSC
+Rscript scDiffCom-Preprocess-PatientZScore.R --dataset_name Kurten_HNSC
+Rscript plotSplitRuleConcordance.R --dataset_name Kurten_HNSC
+```
+
+**Outputs:** `~/Thesis/CCC/outputs/split_rule_concordance/{dataset}/`
+
+- `split_rule_concordance_per_gene.csv` — long-form per-gene pairwise scores
+- `split_rule_concordance_summary.csv` — mean concordance per rule pair
+- `split_rule_concordance_matrix.csv` — symmetric 4×4 matrix
+- `split_rule_concordance_heatmap.png` / `.pdf` — publication figure
+- `split_rule_concordance_run_metadata.tsv` — run parameters
