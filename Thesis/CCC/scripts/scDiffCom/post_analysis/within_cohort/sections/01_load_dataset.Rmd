@@ -1,0 +1,23 @@
+# Load one H&N cohort for within-cohort analysis
+
+```{r load-dataset}
+TARGET.scDiffComs <- load.dataset.scDiffComs(TARGET_DATASET)
+TARGET.malignant <- lapply(
+  TARGET.scDiffComs,
+  filter.scDiffCom.cci_table_detected.for.malignant,
+  malignant_celltype = MALIGNANT_TYPE
+)
+
+n_before <- sum(vapply(TARGET.malignant, nrow, integer(1)))
+TARGET.malignant <- filter_unknown_celltypes_list(TARGET.malignant)
+n_after <- sum(vapply(TARGET.malignant, nrow, integer(1)))
+
+message(sprintf(
+  "%s: %d genes loaded; %d \u2192 %d malignant DE rows after unknown-celltype filter",
+  TARGET_DATASET, length(TARGET.malignant), n_before, n_after
+))
+
+if (!GENE_OF_INT %in% names(TARGET.malignant)) {
+  warning(GENE_OF_INT, " not in loaded genes — boxplot section may fail.")
+}
+```

@@ -23,9 +23,28 @@ build_lri_logfc_mat <- function(malignant_list, min_genes = MIN_GENES_PER_CCI) {
   mat
 }
 
+.plot_lri_umap_helper_path <- function() {
+  pa_dir <- if (exists("POST_ANALYSIS_DIR", inherits = TRUE)) {
+    get("POST_ANALYSIS_DIR", inherits = TRUE)
+  } else {
+    normalizePath(file.path(getwd(), ".."), winslash = "/")
+  }
+  file.path(pa_dir, "within_cohort", "R", "04_within_cohort_helpers.R")
+}
+
+.ensure_within_cohort_helpers <- function() {
+  helper_path <- .plot_lri_umap_helper_path()
+  if (!exists("plot_gene_umap_lri", mode = "function", inherits = TRUE) &&
+      file.exists(helper_path)) {
+    source(helper_path, local = FALSE)
+  }
+}
+
 plot_lri_heatmap_umap <- function(malignant_list, dataset_label,
                                   k_clusters = 5,
-                                  min_genes  = MIN_GENES_PER_CCI) {
+                                  min_genes  = MIN_GENES_PER_CCI,
+                                  run_umap   = TRUE,
+                                  output_dir = OUTPUT_DIR) {
   message("\n=== GENES x LRI: ", dataset_label, " ===")
 
   mat     <- build_lri_logfc_mat(malignant_list, min_genes)
@@ -41,8 +60,7 @@ plot_lri_heatmap_umap <- function(malignant_list, dataset_label,
   sim_mat_clust[is.na(sim_mat_clust)] <- 0
   dist_for_clust <- as.dist(1 - sim_mat_clust)
 
-  # Heatmap
-  heatmap_file <- file.path(OUTPUT_DIR, paste0(dataset_label, "_lri_heatmap.png"))
+  heatmap_file <- file.path(output_dir, paste0(dataset_label, "_lri_heatmap.png"))
   png(heatmap_file,
       width  = max(4000, n_genes * 20),
       height = max(4000, n_genes * 20),
@@ -63,59 +81,18 @@ plot_lri_heatmap_umap <- function(malignant_list, dataset_label,
   )
   dev.off()
   message("  Heatmap saved to ", heatmap_file)
-# 
-#   # UMAP
-#   mat_genes         <- t(mat)
-#   mat_genes_imputed <- mat_genes
-#   mat_genes_imputed[is.na(mat_genes_imputed)] <- 0
-# 
-#   dist_mat   <- as.dist(1 - sim_mat)
-#   hclust_res <- hclust(dist_mat, method = "complete")
-#   clusters   <- cutree(hclust_res, k = k_clusters)
-# 
-#   set.seed(42)
-#   umap_config             <- umap.defaults
-#   umap_config$n_neighbors <- min(15, nrow(mat_genes_imputed) - 1)
-#   umap_config$min_dist    <- 0.1
-#   umap_config$metric      <- "cosine"
-# 
-#   umap_result <- umap(mat_genes_imputed, config = umap_config)
-# 
-#   umap_df <- data.frame(
-#     Gene    = rownames(mat_genes_imputed),
-#     UMAP1   = umap_result$layout[, 1],
-#     UMAP2   = umap_result$layout[, 2],
-#     n_LRIs  = rowSums(!is.na(mat_genes)),
-#     Cluster = factor(clusters[rownames(mat_genes_imputed)])
-#   )
-# 
-#   p_umap <- ggplot(umap_df, aes(x = UMAP1, y = UMAP2, colour = Cluster, label = Gene)) +
-#     geom_point(size = 3, alpha = 0.9) +
-#     geom_text_repel(size = 2.8, max.overlaps = 40,
-#                     segment.size = 0.2, segment.alpha = 0.5, show.legend = FALSE) +
-#     scale_colour_brewer(palette = "Set1", name = "Cluster") +
-#     labs(
-#       title    = paste0(dataset_label, " – Gene UMAP (LRI LOGFC space)"),
-#       subtitle = paste0("Hierarchical clustering (k = ", k_clusters, ", cosine distance)"),
-#       x = "UMAP 1", y = "UMAP 2"
-#     ) +
-#     theme_bw(base_size = 11) +
-#     theme(plot.title = element_text(face = "bold"))
-# 
-#   umap_file <- file.path(OUTPUT_DIR, paste0(dataset_label, "_lri_gene_umap.png"))
-#   ggsave(umap_file, plot = p_umap, width = 10, height = 8, dpi = 300)
-#   message("  UMAP saved to ", umap_file)
-# 
-#   cluster_df <- umap_df %>%
-#     select(Gene, Cluster, n_LRIs) %>%
-#     arrange(Cluster, Gene)
-#   print(cluster_df)
-# 
-#   cluster_summary <- cluster_df %>%
-#     group_by(Cluster) %>%
-#     summarise(n_genes = n(), genes = paste(sort(Gene), collapse = ", ")) %>%
-#     arrange(Cluster)
-#   print(cluster_summary)
-# 
-#   invisible(list(umap_df = umap_df, clusters = clusters))
+
+  if (run_umap) {
+    .ensure_within_cohort_helpers()
+    if (exists("plot_gene_umap_lri", mode = "function", inherits = TRUE)) {
+      plot_gene_umap_lri(
+        mat, sim_mat, dataset_label, output_dir,
+        k_clusters = k_clusters
+      )
+    } else {
+      message("  UMAP skipped — within_cohort helpers not found.")
+    }
+  }
+
+  invisible(list(mat = mat, sim_mat = sim_mat))
 }

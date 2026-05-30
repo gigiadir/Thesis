@@ -22,6 +22,20 @@ Active focus: **four H&N cohorts** (`Kurten_HNSC`, `Puram_HNSC`, `Choi_HNSC`, `B
 | 9 | `sections/09_hvg_ccis.Rmd` | `post-analysis-hvg-ccis` |
 | 10 | `sections/10_limma_batch.Rmd` | `post-analysis-limma-batch` |
 
+### Within-cohort module (single dataset)
+
+| # | File | Outputs |
+|---|------|---------|
+| Setup | `within_cohort/index.Rmd` + `config/within_cohort_config.R` | Configurable `TARGET_DATASET` |
+| W1 | `within_cohort/sections/01_load_dataset.Rmd` | `TARGET.scDiffComs`, `TARGET.malignant` |
+| W2 | `within_cohort/sections/02_axl_boxplot.Rmd` | `{GENE}_{dataset}_CCI_boxplot.png` |
+| W3 | `within_cohort/sections/03_gene_gene_lri.Rmd` + `within_cohort/R/04_within_cohort_helpers.R` | `{dataset}_gene_gene_lri_heatmap.png`, `{dataset}_gene_umap_lri.png` |
+| W4 | `within_cohort/sections/04_gobp_fisher_volcano.Rmd` | `{dataset}_fisher_results_final.rds`, volcano PNGs |
+
+Knit [`within_cohort/index.Rmd`](scDiffCom/post_analysis/within_cohort/index.Rmd) — separate from the cross-cohort driver.
+
+Thesis Methods prose: [post_analysis/METHODS.md](scDiffCom/post_analysis/METHODS.md) (cross-cohort), [within_cohort/METHODS.md](scDiffCom/post_analysis/within_cohort/METHODS.md) (within-cohort).
+
 ---
 
 ## 1. Analysis globals (`R/00_setup.R`)
