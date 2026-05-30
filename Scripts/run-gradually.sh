@@ -1,7 +1,7 @@
 #!/bin/bash
 
 COMMANDS_FILE="/gpfs0/bgu-ofircohen/users/gigiadir/Scripts/submit_scDiffCom_jobs.sh"
-MAX_JOBS=20
+MAX_JOBS=15
 USER=$(whoami)
 
 while IFS= read -r cmd; do
