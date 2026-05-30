@@ -1,0 +1,31 @@
+# GO-BP Fisher enrichment and volcano plots
+#
+# DISABLED — Fisher over all genes is very slow (~hours for 123 genes).
+# Uncomment the chunks below (and the child include in index.Rmd) when ready to run.
+
+<!--
+```{r fisher-enrichment}
+fisher_results <- run_fisher_enrichment(
+  scDiffCom_list = TARGET.scDiffComs,
+  dataset_label  = TARGET_DATASET,
+  output_dir     = WITHIN_COHORT_OUTPUT_DIR,
+  LRI_GO_BP      = LRI_GO_BP,
+  malignant_type = MALIGNANT_TYPE,
+  min_go_size    = MIN_GO_SIZE,
+  min_detected   = MIN_DETECTED,
+  save_every     = SAVE_EVERY
+)
+```
+
+```{r fisher-volcano}
+plot_fisher_volcano(
+  fisher_res      = fisher_results,
+  selected_genes  = SELECTED_GENES,
+  dataset_label   = TARGET_DATASET,
+  output_dir      = WITHIN_COHORT_OUTPUT_DIR,
+  p_adj_cutoff    = P_ADJ_CUTOFF,
+  top_label_n     = TOP_LABEL_N,
+  bold_go_terms   = BOLD_GO_TERMS
+)
+```
+-->

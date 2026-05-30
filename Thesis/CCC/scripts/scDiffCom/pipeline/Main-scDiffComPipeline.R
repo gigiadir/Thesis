@@ -10,14 +10,14 @@ base_output_path <- "/gpfs0/bgu-ofircohen/users/gigiadir/CCC-scDiffCom/results/s
 new_data_dir <- "/gpfs0/bgu-ofircohen/users/gigiadir/scObjects"
 
 logs_path <- file.path(base_output_path, "logs")
-genes_path <- file.path("/gpfs0/bgu-ofircohen/users/gigiadir/Thesis/CCC/outputs/data/Complexes.Oncogenes.OncoKB.Cosmic.NCG.rds")
+genes_path <- file.path("/gpfs0/bgu-ofircohen/users/gigiadir/Thesis/CCC/outputs/RData_objects/GenesLists/Complexes.Oncogenes.OncoKB.Cosmic.NCG.rds")
 if (!dir.exists(logs_path)) dir.create(logs_path, recursive = TRUE)
 
 script_dir <- dirname(script_path)
 wrapper_path <- normalizePath(path.expand("~/Scripts/run_with_scDiffComPipeline_env.sh"), mustWork = FALSE)
 #genes <- c("AXL", "ERBB2", "EGFR", "HLA-A", "HLA-B", "HLA-C", "ESR1", "MKI67", "GATA3", "CTLA4", "CDH1", "CDH2", "CDH11", "CTNNB1", "SDC4", "THBS1", "VWF", "COL1A1", "COL1A2", "VEGFA", "IGF1", "IGF2", "CSF1", "CSF1R", "CSF2")
-genes <- c("ABI1", "ACTB", "ACTG1", "APH1A", "ARID1A", "ARID1B", "ARID2", "AXL", "BARD1", "BAZ1A", "BCL6", "BLM", "BPTF", "BRCA1", "BRIP1", "BUB1B", "CARM1", "CCNC", "CD28", "CDC27", "CDH1", "CDH11", "CDH2", "CDK8", "CDKN2A", "CHD4", "COL1A1", "COL1A2", "CREBBP", "CSF1", "CSF1R", "CSF2", "CTLA4", "CTNNB1", "CUL3", "CUL4A", "CUL7", "CYFIP1", "DNMT3B", "EGFR", "EP300", "ERBB2", "ERCC2", "ERCC3", "ESR1", "FANCA", "FANCC", "FANCE", "FANCF", "FANCG", "FANCL", "GATA3", "GNA11", "GNAQ", "GNB1", "GPS2", "HDAC1", "HDAC2", "HDAC4", "HDAC7", "HLA-A", "HLA-B", "HLA-C", "IGF1", "IGF2", "LDB1", "LMO2", "LTB", "MAPK1", "MAPK3", "MDM2", "MED1", "MED12", "MKI67", "MLH1", "MNAT1", "NBN", "NCOA3", "NCOR1", "NCOR2", "NCSTN", "NDC80", "NDUFB9", "NPM1", "NUF2", "NUP98", "PARP1", "PBRM1", "PHC2", "PIGA", "POLR2A", "PSMB2", "RABEP1", "RAD21", "RAD50", "RAD51B", "RAD51C", "SDC4", "SIN3A", "SKP2", "SMARCA1", "SMARCA2", "SMARCA4", "SMARCB1", "SMARCD1", "SMARCE1", "SMC1A", "STAG1", "STAG2", "STAT1", "STAT2", "TBL1XR1", "TCEB1", "THBS1", "THRAP3", "TP53", "TRAK1", "VEGFA", "VHL", "VWF", "XRCC1", "XRCC2", "YY1")
-# genes <- readRDS(genes_path)
+#genes <- c("ABI1", "ACTB", "ACTG1", "APH1A", "ARID1A", "ARID1B", "ARID2", "AXL", "BARD1", "BAZ1A", "BCL6", "BLM", "BPTF", "BRCA1", "BRIP1", "BUB1B", "CARM1", "CCNC", "CD28", "CDC27", "CDH1", "CDH11", "CDH2", "CDK8", "CDKN2A", "CHD4", "COL1A1", "COL1A2", "CREBBP", "CSF1", "CSF1R", "CSF2", "CTLA4", "CTNNB1", "CUL3", "CUL4A", "CUL7", "CYFIP1", "DNMT3B", "EGFR", "EP300", "ERBB2", "ERCC2", "ERCC3", "ESR1", "FANCA", "FANCC", "FANCE", "FANCF", "FANCG", "FANCL", "GATA3", "GNA11", "GNAQ", "GNB1", "GPS2", "HDAC1", "HDAC2", "HDAC4", "HDAC7", "HLA-A", "HLA-B", "HLA-C", "IGF1", "IGF2", "LDB1", "LMO2", "LTB", "MAPK1", "MAPK3", "MDM2", "MED1", "MED12", "MKI67", "MLH1", "MNAT1", "NBN", "NCOA3", "NCOR1", "NCOR2", "NCSTN", "NDC80", "NDUFB9", "NPM1", "NUF2", "NUP98", "PARP1", "PBRM1", "PHC2", "PIGA", "POLR2A", "PSMB2", "RABEP1", "RAD21", "RAD50", "RAD51B", "RAD51C", "SDC4", "SIN3A", "SKP2", "SMARCA1", "SMARCA2", "SMARCA4", "SMARCB1", "SMARCD1", "SMARCE1", "SMC1A", "STAG1", "STAG2", "STAT1", "STAT2", "TBL1XR1", "TCEB1", "THBS1", "THRAP3", "TP53", "TRAK1", "VEGFA", "VHL", "VWF", "XRCC1", "XRCC2", "YY1")
+ genes <- readRDS(genes_path)
 
 
 bash_file_path <- file.path(script_dir, "submit_scDiffCom_jobs.sh")

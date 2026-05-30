@@ -1,0 +1,68 @@
+---
+title: "Within-Cohort Differential Communication Phenotypes (H&N)"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+This notebook runs **within-cohort** scDiffCom post-analysis for a single Head & Neck dataset.
+Edit [`config/within_cohort_config.R`](config/within_cohort_config.R) (`TARGET_DATASET`) before knitting.
+
+See [README.md](README.md) for outputs and run instructions.
+
+```{r setup-within-cohort, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = TRUE,
+  warning = TRUE,
+  fig.width = 10,
+  fig.height = 7
+)
+
+WITHIN_COHORT_DIR <- normalizePath(".", winslash = "/")
+POST_ANALYSIS_DIR <- normalizePath(file.path(WITHIN_COHORT_DIR, ".."), winslash = "/")
+PROJECT_SCRIPTS   <- normalizePath(file.path(POST_ANALYSIS_DIR, "..", ".."), winslash = "/")
+
+source(file.path(PROJECT_SCRIPTS, "utils/Utils.R"))
+source(file.path(PROJECT_SCRIPTS, "utils/my.utils.R"))
+source(file.path(POST_ANALYSIS_DIR, "R/00_setup.R"))
+source(file.path(POST_ANALYSIS_DIR, "R/01_load_filter.R"))
+source(file.path(POST_ANALYSIS_DIR, "config/hnsc_datasets.R"))
+source(file.path(POST_ANALYSIS_DIR, "R/03_lri_helpers.R"))
+source(file.path(WITHIN_COHORT_DIR, "config/within_cohort_config.R"))
+source(file.path(WITHIN_COHORT_DIR, "R/04_within_cohort_helpers.R"))
+
+dir.create(WITHIN_COHORT_OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+OUTPUT_DIR <- WITHIN_COHORT_OUTPUT_DIR
+
+if (!TARGET_DATASET %in% HNSC_DATASETS) {
+  stop("TARGET_DATASET must be one of: ", paste(HNSC_DATASETS, collapse = ", "))
+}
+
+DATASET_SHORT <- ds_short_map[[TARGET_DATASET]]
+
+library(ggplot2)
+library(ggrepel)
+library(gplots)
+library(umap)
+library(RColorBrewer)
+library(scales)
+
+message("Within-cohort analysis for: ", TARGET_DATASET,
+        " (", DATASET_SHORT, ") → ", WITHIN_COHORT_OUTPUT_DIR)
+```
+
+```{r child = "sections/01_load_dataset.Rmd"}
+```
+
+```{r child = "sections/02_axl_boxplot.Rmd"}
+```
+
+```{r child = "sections/03_gene_gene_lri.Rmd"}
+```
+
+<!-- Fisher + volcano disabled (slow). Uncomment when ready:
+```{r child = "sections/04_gobp_fisher_volcano.Rmd"}
+```
+-->

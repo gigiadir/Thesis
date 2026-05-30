@@ -24,7 +24,13 @@ Cross-cohort comparison of scDiffCom results after pipeline jobs complete.
 | 9 | `sections/09_hvg_ccis.Rmd` | `cci_hvg_variance_ranking_h&n.csv` |
 | 10 | `sections/10_limma_batch.Rmd` | `cci_post_analysis_matrices_h&n.rds`, CCI UMAPs |
 
-Default plot directory: `~/Thesis/CCC/outputs/scDiffCom/plots/v5-split-by-rank` (`OUTPUT_DIR` in `R/00_setup.R`).
+Default plot directory: `~/Thesis/CCC/outputs/scDiffCom/plots/v6` (`OUTPUT_DIR` in `R/00_setup.R`).
+
+## Methods documentation
+
+Thesis-ready description of cross-cohort representations, modules, and parameters: [METHODS.md](METHODS.md).
+
+Within-cohort (single dataset) methods: [within_cohort/METHODS.md](within_cohort/METHODS.md).
 
 ## Layout
 
@@ -44,6 +50,21 @@ post_analysis/
 3. Edit `sections/01_load_and_filter.Rmd` — load + filter blocks (copy an existing cohort).
 4. Edit `sections/03_build_cci_sets.Rmd` — build `*_top_cci_sets` and list entries.
 5. Re-knit `index.Rmd`.
+
+## Within-cohort phenotypes (single H&N dataset)
+
+For **Results** figures — AXL boxplot, gene-gene LRI heatmap, gene UMAP, Fisher GO-BP + volcano — use the standalone driver:
+
+```
+within_cohort/index.Rmd
+```
+
+1. Edit `within_cohort/config/within_cohort_config.R` → set `TARGET_DATASET`.
+2. Knit `within_cohort/index.Rmd` (working directory = `within_cohort/`).
+
+Outputs: `~/Thesis/CCC/outputs/scDiffCom/plots/within_cohort/{TARGET_DATASET}/`
+
+See [within_cohort/README.md](within_cohort/README.md) for the full output list.
 
 ## Multi-cancer (Breast / Lung)
 

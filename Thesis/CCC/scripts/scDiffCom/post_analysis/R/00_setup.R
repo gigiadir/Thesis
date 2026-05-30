@@ -14,13 +14,13 @@ library(SuperRanker)
 
 
 # BASE_RESULTS_DIR <- "~/Thesis/CCC/outputs/scDiffCom/scDiffComs/Consensus_Cell_Type"
-BASE_RESULTS_DIR <- "~/CCC-scDiffCom/results/split-by-rank-genes"
+BASE_RESULTS_DIR <- "~/CCC-scDiffCom/results/split-by-rank-genes-v2"
 # MALIGNANT_CELLTYPE <- c("Epithelial", "Malignant", "Tumor", "Cancer")
 MALIGNANT_CELLTYPE <- c("Tumor")
 USE_COSINE         <- TRUE           # TRUE → cosine distance instead of correlation
 MIN_GENES_PER_CCI  <- 2              # CCIs must appear in ≥ N genes (filters sparse rows)
 # OUTPUT_DIR         <- "~/Thesis/CCC/outputs/scDiffCom/plots/v2"            # where to save output PNGs (v2 — original, no unknown-type filter)
-OUTPUT_DIR         <- "~/Thesis/CCC/outputs/scDiffCom/plots/v5-split-by-rank"
+OUTPUT_DIR         <- "~/Thesis/CCC/outputs/scDiffCom/plots/v6"
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 LRI_GO <- scDiffCom::LRI_human$LRI_curated_GO
@@ -28,4 +28,6 @@ BP_GO_INFO <- scDiffCom::gene_ontology_level %>%
   filter(ASPECT == "biological_process") %>%
   select(ID, NAME)
 LRI_GO_BP <- LRI_GO %>%
-  inner_join(BP_GO_INFO, by = c("GO_ID" = "ID"))
+  inner_join(BP_GO_INFO, by = c("GO_ID" = "ID")) %>%
+  mutate(GO_NAME = .data$NAME) %>%
+  select(LRI, GO_ID, GO_NAME)
