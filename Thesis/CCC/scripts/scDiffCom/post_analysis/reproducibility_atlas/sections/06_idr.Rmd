@@ -1,0 +1,12 @@
+# Stage 6 — IDR
+
+```{r stage-06-setup, include=FALSE}
+source(file.path("..", "R", "00_atlas_setup.R"))
+atlas_env <- require.atlas.checkpoint(5)
+```
+
+```{r stage-06}
+atlas_env <- run_stage_06_idr(atlas_env)
+assign("atlas_env", atlas_env, envir = .GlobalEnv)
+head(atlas_env$idr_df)
+```

@@ -1,0 +1,12 @@
+# Stage 2 — Tensor X
+
+```{r stage-02-setup, include=FALSE}
+source(file.path("..", "R", "00_atlas_setup.R"))
+atlas_env <- require.atlas.checkpoint(1)
+```
+
+```{r stage-02}
+atlas_env <- run_stage_02_tensor(atlas_env)
+assign("atlas_env", atlas_env, envir = .GlobalEnv)
+dim(atlas_env$X[[1]])
+```

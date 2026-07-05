@@ -12,8 +12,8 @@ malignant_orig_catalog <- .hnsc_malignant_orig_catalog()
 noise_counts_gene <- purrr::imap_dfr(malignant_orig_catalog, function(gene_list, ds_full) {
   purrr::imap_dfr(gene_list, function(df, gene) {
     if (nrow(df) == 0) return(NULL)
-    n_other <- sum(is_unknown_celltype(df$EMITTER_CELLTYPE) |
-                   is_unknown_celltype(df$RECEIVER_CELLTYPE))
+    n_other <- sum(is.unknown.celltype(df$EMITTER_CELLTYPE) |
+                   is.unknown.celltype(df$RECEIVER_CELLTYPE))
     data.frame(Dataset = ds_full, Gene = gene,
                Clean = nrow(df) - n_other, Contains_Other = n_other,
                stringsAsFactors = FALSE)

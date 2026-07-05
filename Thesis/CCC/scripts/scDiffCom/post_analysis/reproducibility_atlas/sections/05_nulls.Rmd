@@ -1,0 +1,12 @@
+# Stage 5 — Nulls and significance
+
+```{r stage-05-setup, include=FALSE}
+source(file.path("..", "R", "00_atlas_setup.R"))
+atlas_env <- require.atlas.checkpoint(4)
+```
+
+```{r stage-05}
+atlas_env <- run_stage_05_nulls(atlas_env)
+assign("atlas_env", atlas_env, envir = .GlobalEnv)
+atlas_env$global_null
+```

@@ -1,27 +1,5 @@
 # Stage 0 — discover cohorts/genes, verify scDiffCom structure, build filtered lists.
 
-is_unknown_celltype <- function(ct) {
-  grepl("unknown|other|equivocal", ct, ignore.case = TRUE)
-}
-
-filter_unknown_celltypes <- function(cci_df) {
-  cci_df %>%
-    filter(
-      !is_unknown_celltype(EMITTER_CELLTYPE),
-      !is_unknown_celltype(RECEIVER_CELLTYPE)
-    )
-}
-
-.genes_from_rds_dir <- function(results_dir, cohort) {
-  rds_dir <- file.path(results_dir, cohort)
-  files <- list.files(
-    rds_dir,
-    pattern = paste0("_", cohort, "_scDiffCom\\.rds$"),
-    full.names = FALSE
-  )
-  sort(str_remove(files, paste0("_", cohort, "_scDiffCom\\.rds$")))
-}
-
 run_stage_00_inspect <- function(cfg) {
   results_dir <- path.expand(cfg$base_results_dir)
   output_dir  <- path.expand(cfg$output_dir)
@@ -32,16 +10,10 @@ run_stage_00_inspect <- function(cfg) {
   message("  results_dir: ", results_dir)
   message("  output_dir:  ", output_dir)
 
-  genes_by_cohort <- stats::setNames(
-    lapply(cohorts, .genes_from_rds_dir, results_dir = results_dir),
-    cohorts
-  )
-  for (ds in cohorts) {
-    message(sprintf("  %s: %d genes on disk", ds, length(genes_by_cohort[[ds]])))
-  }
-
-  gene_universe <- Reduce(intersect, genes_by_cohort)
-  gene_union    <- sort(unique(unlist(genes_by_cohort)))
+  discovered <- discover.gene.universe.from.cohorts(cohorts, results_dir = results_dir)
+  genes_by_cohort <- discovered$genes_by_cohort
+  gene_universe   <- discovered$gene_universe
+  gene_union      <- discovered$gene_union
   message(sprintf("  gene intersection: %d | union: %d", length(gene_universe), length(gene_union)))
 
   if (length(gene_universe) == 0) {
@@ -77,34 +49,26 @@ run_stage_00_inspect <- function(cfg) {
   sample_slots  <- paste(slotNames(sample_obj), collapse = ", ")
   rm(sample_obj)
 
-  malignant_by_cohort <- stats::setNames(vector("list", length(cohorts)), cohorts)
-  ckpt_dir <- file.path(output_dir, "results", "checkpoints")
-  dir.create(ckpt_dir, recursive = TRUE, showWarnings = FALSE)
+  hn_load <- load.and.filter.malignant.by.cohorts(
+    cohorts = cohorts,
+    results_dir = results_dir,
+    genes = gene_universe,
+    filter_unknown_celltypes = isTRUE(cfg$filter_unknown_celltypes),
+    malignant_celltype = cfg$malignant_celltype,
+    checkpoint_dir = file.path(output_dir, "results", "checkpoints"),
+    verbose = TRUE
+  )
+  malignant_by_cohort <- hn_load$malignant_by_cohort
 
-  for (ds in cohorts) {
-    ckpt_path <- file.path(ckpt_dir, paste0(ds, "_malignant.rds"))
-    if (file.exists(ckpt_path)) {
-      message("  Loading checkpoint for ", ds)
-      malignant_by_cohort[[ds]] <- readRDS(ckpt_path)
-      next
-    }
-    message("  Loading + filtering DE tables for ", ds, " (", length(gene_universe), " genes)...")
-    out <- list()
-    for (gene in gene_universe) {
-      rds_path <- file.path(
-        results_dir, ds,
-        sprintf("%s_%s_scDiffCom.rds", gene, ds)
+  if (isTRUE(cfg$filter_unknown_celltypes)) {
+    message("Unknown-celltype filter applied:")
+    for (ds in cohorts) {
+      report.filter.malignant(
+        hn_load$malignant_orig_by_cohort[[ds]],
+        hn_load$malignant_by_cohort[[ds]],
+        ds
       )
-      if (!file.exists(rds_path)) next
-      df <- filter.scDiffCom.cci_table_detected.for.malignant(readRDS(rds_path))
-      if (isTRUE(cfg$filter_unknown_celltypes)) {
-        df <- filter_unknown_celltypes(df)
-      }
-      out[[gene]] <- df
     }
-    malignant_by_cohort[[ds]] <- out
-    saveRDS(out, ckpt_path)
-    message("  Checkpoint saved: ", ckpt_path)
   }
 
   inspect_lines <- c(

@@ -1,0 +1,14 @@
+# Stage 1 — CCI vocabulary
+
+```{r stage-01-setup, include=FALSE}
+source(file.path("..", "R", "00_atlas_setup.R"))
+atlas_env <- require.atlas.checkpoint(0)
+```
+
+```{r stage-01}
+atlas_env <- run_stage_01_vocab(atlas_env)
+assign("atlas_env", atlas_env, envir = .GlobalEnv)
+length(atlas_env$J)
+```
+
+Review `results/vocab_report.tsv` before continuing.

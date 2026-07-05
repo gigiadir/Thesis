@@ -1,0 +1,12 @@
+# Stage 3 — Cohort centering
+
+```{r stage-03-setup, include=FALSE}
+source(file.path("..", "R", "00_atlas_setup.R"))
+atlas_env <- require.atlas.checkpoint(2)
+```
+
+```{r stage-03}
+atlas_env <- run_stage_03_center(atlas_env)
+assign("atlas_env", atlas_env, envir = .GlobalEnv)
+atlas_env$centering_baseline
+```

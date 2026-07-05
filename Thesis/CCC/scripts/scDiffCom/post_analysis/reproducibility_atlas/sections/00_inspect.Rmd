@@ -1,0 +1,28 @@
+# Stage 0 — Inspect and load
+
+Load scDiffCom results, apply DE malignant + unknown-celltype filters (via shared
+[`load.and.filter.malignant.by.cohorts()`](../../R/01_load_filter.R)), write gene universe reports.
+
+```{r stage-00-setup, include=FALSE}
+if (!exists("cfg")) {
+  source(file.path("..", "R", "00_atlas_setup.R"))
+  init.atlas.session(normalizePath("..", winslash = "/"))
+}
+```
+
+```{r stage-00}
+stage00_path <- file.path(results_dir, "stage00_atlas_env.rds")
+if (file.exists(stage00_path)) {
+  message("Loading existing stage00_atlas_env.rds (delete to re-run from scratch)")
+  atlas_env <- readRDS(stage00_path)
+} else {
+  atlas_env <- run_stage_00_inspect(cfg)
+  file.copy(
+    file.path(ATLAS_DIR, "config.yml"),
+    file.path(results_dir, "config_used.yml"),
+    overwrite = TRUE
+  )
+}
+assign("atlas_env", atlas_env, envir = .GlobalEnv)
+length(atlas_env$gene_universe)
+```

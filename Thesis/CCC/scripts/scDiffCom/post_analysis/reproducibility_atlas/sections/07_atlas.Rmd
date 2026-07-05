@@ -1,0 +1,12 @@
+# Stage 7 — Atlas assembly
+
+```{r stage-07-setup, include=FALSE}
+source(file.path("..", "R", "00_atlas_setup.R"))
+atlas_env <- require.atlas.checkpoint(6)
+```
+
+```{r stage-07}
+atlas_env <- run_stage_07_atlas(atlas_env)
+assign("atlas_env", atlas_env, envir = .GlobalEnv)
+sum(atlas_env$atlas$atlas_member, na.rm = TRUE)
+```

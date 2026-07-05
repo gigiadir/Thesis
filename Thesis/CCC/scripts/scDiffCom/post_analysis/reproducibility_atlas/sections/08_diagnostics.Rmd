@@ -1,0 +1,12 @@
+# Diagnostics
+
+```{r stage-08-setup, include=FALSE}
+source(file.path("..", "R", "00_atlas_setup.R"))
+atlas_env <- require.atlas.checkpoint(7)
+```
+
+```{r stage-08}
+atlas_env <- run_diagnostics(atlas_env)
+assign("atlas_env", atlas_env, envir = .GlobalEnv)
+atlas_env$diagnostics$module_summary
+```

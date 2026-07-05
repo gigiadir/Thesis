@@ -1,0 +1,12 @@
+# Stage 4 — ReproScore
+
+```{r stage-04-setup, include=FALSE}
+source(file.path("..", "R", "00_atlas_setup.R"))
+atlas_env <- require.atlas.checkpoint(3)
+```
+
+```{r stage-04}
+atlas_env <- run_stage_04_reproscore(atlas_env)
+assign("atlas_env", atlas_env, envir = .GlobalEnv)
+head(atlas_env$repro_df)
+```
