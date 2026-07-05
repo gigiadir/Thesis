@@ -1,27 +1,27 @@
 # Cross-Cohort CCI Reproducibility Atlas
 
-## Interactive (Rmd)
+## Layout
 
-Open [`index.Rmd`](index.Rmd) in RStudio and run chunks section by section.
+| Path | Purpose |
+|------|---------|
+| [`index.Rmd`](index.Rmd) | Interactive driver — run section chunks in order |
+| [`sections/*.Rmd`](sections/) | **Stage code lives here** (inspect, vocab, tensor, …) |
+| [`R/atlas_helpers.R`](R/atlas_helpers.R) | Shared functions (ReproScore, IDR, tensor helpers) |
+| [`R/00_atlas_setup.R`](R/00_atlas_setup.R) | Session init, checkpoints, `knit.atlas.section()` |
+| [`../R/01_load_filter.R`](../R/01_load_filter.R) | Load/filter scDiffCom (shared with post_analysis) |
 
-Each section can also be opened standalone under [`sections/`](sections/) — it loads the prior stage checkpoint automatically.
+## Interactive
+
+Open [`index.Rmd`](index.Rmd) or any file under [`sections/`](sections/) in RStudio. Each section contains the full stage logic; standalone sections load the prior checkpoint if `atlas_env` is missing.
 
 ## CLI
 
 ```bash
-cd reproducibility_atlas
-Rscript run_atlas.R 0   # one stage
-Rscript run_atlas.R     # all stages + diagnostics
+Rscript run_atlas.R      # all sections
+Rscript run_atlas.R 0    # one section (00_inspect.Rmd)
+Rscript run_atlas.R diag
 ```
-
-## Shared load/filter logic
-
-Loading and filtering reuse [`../R/01_load_filter.R`](../R/01_load_filter.R):
-
-- `load.and.filter.malignant.by.cohorts()` — used by Stage 0 and post-analysis `01_load_and_filter.Rmd`
-- `discover.gene.universe.from.cohorts()` — gene intersection from RDS filenames
-- `filter.unknown.celltypes()` / `report.filter.malignant()`
 
 ## Config
 
-Edit [`config.yml`](config.yml) before running. A copy is saved to `results/config_used.yml`.
+[`config.yml`](config.yml) — copied to `results/config_used.yml` on first run.

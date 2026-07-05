@@ -1,12 +1,49 @@
 # Stage 4 — ReproScore
 
-```{r stage-04-setup, include=FALSE}
-source(file.path("..", "R", "00_atlas_setup.R"))
-atlas_env <- require.atlas.checkpoint(3)
+```{r setup, include=FALSE}
+if (!exists("cfg")) {
+  source(file.path("..", "R", "00_atlas_setup.R"))
+  init.atlas.session(normalizePath("..", winslash = "/"))
+}
+if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(3)
 ```
 
 ```{r stage-04}
-atlas_env <- run_stage_04_reproscore(atlas_env)
-assign("atlas_env", atlas_env, envir = .GlobalEnv)
-head(atlas_env$repro_df)
+output_dir <- atlas_env$output_dir
+cohorts <- atlas_env$cohorts
+gene_universe <- atlas_env$gene_universe
+Xtilde <- atlas_env$Xtilde
+
+message("Stage 4: ReproScore")
+
+idx_pairs <- cohort_pairs(length(cohorts))
+pair_labels <- vapply(idx_pairs, function(pr) {
+  paste(cohorts[pr[1]], cohorts[pr[2]], sep = "_vs_")
+}, character(1))
+
+repro <- compute_repro(Xtilde, idx_pairs)
+names(repro$cor_mats) <- pair_labels
+
+repro_df <- data.frame(
+  gene = gene_universe,
+  ReproScore = repro$ReproScore,
+  R_self = repro$R_self,
+  frac_pairs = repro$frac_pairs,
+  stringsAsFactors = FALSE
+)
+
+if (isTRUE(cfg$eb_shrink)) {
+  repro_df$R_self_shrunk <- 0.5 * repro_df$R_self + 0.5 * mean(repro_df$R_self, na.rm = TRUE)
+}
+
+readr::write_tsv(repro_df, file.path(output_dir, "results", "repro_scores.tsv"))
+saveRDS(repro$cor_mats, file.path(output_dir, "results", "cor_pair_matrices.rds"))
+
+atlas_env$repro <- repro
+atlas_env$repro_df <- repro_df
+atlas_env$cohort_pairs <- idx_pairs
+atlas_env$pair_labels <- pair_labels
+save.atlas.checkpoint(atlas_env, 4)
+
+head(repro_df)
 ```

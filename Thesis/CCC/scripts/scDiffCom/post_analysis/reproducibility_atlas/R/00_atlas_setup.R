@@ -1,4 +1,4 @@
-# Shared session setup for reproducibility atlas (Rmd + run_atlas.R).
+# Session setup for reproducibility atlas (Rmd + run_atlas.R).
 
 init.atlas.session <- function(atlas_dir = NULL) {
   if (is.null(atlas_dir)) {
@@ -14,21 +14,7 @@ init.atlas.session <- function(atlas_dir = NULL) {
   source(file.path(post_analysis_dir, "R/00_setup.R"))
   source(file.path(post_analysis_dir, "R/01_load_filter.R"))
   source(file.path(post_analysis_dir, "config/hnsc_datasets.R"))
-
-  stage_files <- c(
-    "00_inspect_objects.R",
-    "01_cci_vocabulary.R",
-    "02_build_tensor.R",
-    "03_center.R",
-    "04_reproscore.R",
-    "05_nulls.R",
-    "06_idr.R",
-    "07_atlas.R",
-    "diagnostics.R"
-  )
-  for (f in stage_files) {
-    source(file.path(atlas_dir, "R", f))
-  }
+  source(file.path(atlas_dir, "R/atlas_helpers.R"))
 
   cfg <- yaml::read_yaml(file.path(atlas_dir, "config.yml"))
   cfg$base_results_dir <- path.expand(cfg$base_results_dir)
@@ -60,15 +46,13 @@ ensure.atlas.setup <- function(atlas_dir = NULL) {
 load.atlas.checkpoint <- function(stage_n, results_dir = get("results_dir", envir = .GlobalEnv)) {
   path <- file.path(results_dir, sprintf("stage%02d_atlas_env.rds", stage_n))
   if (!file.exists(path)) {
-    stop("Missing checkpoint: ", path, " — run stage ", stage_n, " first.")
+    stop("Missing checkpoint: ", path, " — run the previous section first.")
   }
   readRDS(path)
 }
 
-require.atlas.checkpoint <- function(stage_n) {
-  ensure.atlas.setup()
-  if (exists("atlas_env", envir = .GlobalEnv)) {
-    return(get("atlas_env", envir = .GlobalEnv))
-  }
-  load.atlas.checkpoint(stage_n)
+knit.atlas.section <- function(section_file, atlas_dir = get("ATLAS_DIR", envir = .GlobalEnv)) {
+  path <- file.path(atlas_dir, "sections", section_file)
+  if (!file.exists(path)) stop("Section not found: ", path)
+  knitr::knit(path, envir = .GlobalEnv)
 }

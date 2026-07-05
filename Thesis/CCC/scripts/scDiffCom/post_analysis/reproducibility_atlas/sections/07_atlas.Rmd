@@ -1,12 +1,32 @@
 # Stage 7 — Atlas assembly
 
-```{r stage-07-setup, include=FALSE}
-source(file.path("..", "R", "00_atlas_setup.R"))
-atlas_env <- require.atlas.checkpoint(6)
+```{r setup, include=FALSE}
+if (!exists("cfg")) {
+  source(file.path("..", "R", "00_atlas_setup.R"))
+  init.atlas.session(normalizePath("..", winslash = "/"))
+}
+if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(6)
 ```
 
 ```{r stage-07}
-atlas_env <- run_stage_07_atlas(atlas_env)
-assign("atlas_env", atlas_env, envir = .GlobalEnv)
-sum(atlas_env$atlas$atlas_member, na.rm = TRUE)
+output_dir <- atlas_env$output_dir
+
+message("Stage 7: assemble atlas")
+
+atlas <- atlas_env$repro_df %>%
+  left_join(atlas_env$idr_df, by = "gene") %>%
+  mutate(
+    atlas_member = ReproScore > cfg$reproscore_threshold &
+      shuffle_FDR < cfg$fdr_threshold &
+      !is.na(idr_pass_fraction)
+  )
+
+readr::write_csv(atlas, file.path(output_dir, "results", "atlas.csv"))
+if (requireNamespace("arrow", quietly = TRUE)) {
+  arrow::write_parquet(atlas, file.path(output_dir, "results", "atlas.parquet"))
+}
+
+atlas_env$atlas <- atlas
+save.atlas.checkpoint(atlas_env, 7)
+sum(atlas$atlas_member, na.rm = TRUE)
 ```

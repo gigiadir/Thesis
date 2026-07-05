@@ -1,14 +1,64 @@
 # Stage 1 — CCI vocabulary
 
-```{r stage-01-setup, include=FALSE}
-source(file.path("..", "R", "00_atlas_setup.R"))
-atlas_env <- require.atlas.checkpoint(0)
+Review `results/vocab_report.tsv` before continuing.
+
+```{r setup, include=FALSE}
+if (!exists("cfg")) {
+  source(file.path("..", "R", "00_atlas_setup.R"))
+  init.atlas.session(normalizePath("..", winslash = "/"))
+}
+if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(0)
 ```
 
 ```{r stage-01}
-atlas_env <- run_stage_01_vocab(atlas_env)
-assign("atlas_env", atlas_env, envir = .GlobalEnv)
-length(atlas_env$J)
-```
+output_dir <- atlas_env$output_dir
+cohorts <- atlas_env$cohorts
+malignant_by_cohort <- atlas_env$malignant_by_cohort
 
-Review `results/vocab_report.tsv` before continuing.
+message("Stage 1: build CCI vocabulary")
+cci_by_cohort <- cci_union_per_cohort(malignant_by_cohort)
+
+for (ds in cohorts) {
+  message(sprintf("  %s: %d unique DE CCIs", ds, length(cci_by_cohort[[ds]])))
+}
+
+J_intersection <- Reduce(intersect, cci_by_cohort)
+J_union        <- sort(unique(unlist(cci_by_cohort)))
+vocab_mode     <- cfg$vocab_mode
+
+if (!vocab_mode %in% c("intersection", "union")) {
+  stop("vocab_mode must be 'intersection' or 'union'")
+}
+
+J <- if (vocab_mode == "intersection") J_intersection else J_union
+if (length(J) == 0) stop("CCI vocabulary J is empty")
+
+na_mask <- lapply(cci_by_cohort, function(cci_set) !J %in% cci_set)
+names(na_mask) <- cohorts
+support_loss <- 1 - length(J_intersection) / length(J_union)
+
+vocab_report <- data.frame(
+  metric = c("J_intersection", "J_union", "J_selected", "vocab_mode", "support_loss_fraction", "n_cohorts"),
+  value = c(length(J_intersection), length(J_union), length(J), vocab_mode, support_loss, length(cohorts)),
+  stringsAsFactors = FALSE
+)
+per_cohort <- purrr::imap_dfr(cci_by_cohort, function(cci_set, ds) {
+  data.frame(
+    cohort = ds, n_de_ccis = length(cci_set),
+    n_in_J = sum(J %in% cci_set), n_missing_from_J = sum(!J %in% cci_set),
+    stringsAsFactors = FALSE
+  )
+})
+
+readr::write_tsv(vocab_report, file.path(output_dir, "results", "vocab_report.tsv"))
+readr::write_tsv(per_cohort, file.path(output_dir, "results", "vocab_per_cohort.tsv"))
+saveRDS(J, file.path(output_dir, "results", "J.rds"))
+saveRDS(na_mask, file.path(output_dir, "results", "vocab_na_mask.rds"))
+
+atlas_env$J <- J
+atlas_env$na_mask <- na_mask
+atlas_env$cci_by_cohort <- cci_by_cohort
+save.atlas.checkpoint(atlas_env, 1)
+
+length(J)
+```
