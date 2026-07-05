@@ -65,20 +65,46 @@ run_stage_00_inspect <- function(cfg) {
   )
   readr::write_tsv(missing_tbl, file.path(output_dir, "results", "genes_missing_per_cohort.tsv"))
 
-  scDiffComs_by_cohort <- stats::setNames(
-    lapply(cohorts, load.dataset.scDiffComs, results_dir = results_dir),
-    cohorts
+  sample_cohort <- cohorts[[1]]
+  sample_gene   <- gene_universe[[1]]
+  sample_path   <- file.path(
+    results_dir, sample_cohort,
+    sprintf("%s_%s_scDiffCom.rds", sample_gene, sample_cohort)
   )
-  scDiffComs_by_cohort <- lapply(scDiffComs_by_cohort, function(lst) lst[gene_universe])
+  sample_obj    <- readRDS(sample_path)
+  sample_df     <- sample_obj@cci_table_detected
+  sample_class  <- paste(class(sample_obj), collapse = ", ")
+  sample_slots  <- paste(slotNames(sample_obj), collapse = ", ")
+  rm(sample_obj)
 
-  malignant_by_cohort <- lapply(scDiffComs_by_cohort, function(lst) {
-    lapply(lst, filter.scDiffCom.cci_table_detected.for.malignant)
-  })
+  malignant_by_cohort <- stats::setNames(vector("list", length(cohorts)), cohorts)
+  ckpt_dir <- file.path(output_dir, "results", "checkpoints")
+  dir.create(ckpt_dir, recursive = TRUE, showWarnings = FALSE)
 
-  if (isTRUE(cfg$filter_unknown_celltypes)) {
-    malignant_by_cohort <- lapply(malignant_by_cohort, function(lst) {
-      lapply(lst, filter_unknown_celltypes)
-    })
+  for (ds in cohorts) {
+    ckpt_path <- file.path(ckpt_dir, paste0(ds, "_malignant.rds"))
+    if (file.exists(ckpt_path)) {
+      message("  Loading checkpoint for ", ds)
+      malignant_by_cohort[[ds]] <- readRDS(ckpt_path)
+      next
+    }
+    message("  Loading + filtering DE tables for ", ds, " (", length(gene_universe), " genes)...")
+    out <- list()
+    for (gene in gene_universe) {
+      rds_path <- file.path(
+        results_dir, ds,
+        sprintf("%s_%s_scDiffCom.rds", gene, ds)
+      )
+      if (!file.exists(rds_path)) next
+      df <- filter.scDiffCom.cci_table_detected.for.malignant(readRDS(rds_path))
+      if (isTRUE(cfg$filter_unknown_celltypes)) {
+        df <- filter_unknown_celltypes(df)
+      }
+      out[[gene]] <- df
+    }
+    malignant_by_cohort[[ds]] <- out
+    saveRDS(out, ckpt_path)
+    message("  Checkpoint saved: ", ckpt_path)
   }
 
   inspect_lines <- c(
@@ -92,16 +118,11 @@ run_stage_00_inspect <- function(cfg) {
     ""
   )
 
-  sample_cohort <- cohorts[[1]]
-  sample_gene   <- gene_universe[[1]]
-  sample_obj    <- scDiffComs_by_cohort[[sample_cohort]][[sample_gene]]
-  sample_df     <- sample_obj@cci_table_detected
-
   inspect_lines <- c(
     inspect_lines,
     sprintf("Sample object: %s / %s", sample_cohort, sample_gene),
-    paste("class:", paste(class(sample_obj), collapse = ", ")),
-    paste("slots:", paste(slotNames(sample_obj), collapse = ", ")),
+    paste("class:", sample_class),
+    paste("slots:", sample_slots),
     paste("cci_table_detected columns:", paste(names(sample_df), collapse = ", ")),
     sprintf("cci_table_detected dim: %d rows x %d cols", nrow(sample_df), ncol(sample_df)),
     "",
@@ -142,7 +163,6 @@ run_stage_00_inspect <- function(cfg) {
   atlas_env$cohorts              <- cohorts
   atlas_env$gene_universe        <- gene_universe
   atlas_env$genes_by_cohort      <- genes_by_cohort
-  atlas_env$scDiffComs_by_cohort <- scDiffComs_by_cohort
   atlas_env$malignant_by_cohort  <- malignant_by_cohort
 
   saveRDS(
