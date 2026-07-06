@@ -45,7 +45,7 @@ filter.scDiffCom.cci_table_detected.for.celltypes <- function(scDiffCom_obj,
 }
 
 is.unknown.celltype <- function(ct) {
-  grepl("unknown|other|equivocal", ct, ignore.case = TRUE)
+  grepl("unknown|other|equivocal|multi", ct, ignore.case = TRUE)
 }
 
 filter.unknown.celltypes <- function(cci_df) {
