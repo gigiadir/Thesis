@@ -1,7 +1,7 @@
 # Gene-of-interest cross-cohort heatmap (4 H&N datasets)
 
 ```{r goi-cross-cohort-jaccard}
-OUTPUT_DIR <- "~/Thesis/CCC/outputs/scDiffCom/plots/v3"
+OUTPUT_DIR <- "~/Thesis/CCC/outputs/scDiffCom/plots/v6"
 GENE_OF_INT <- "AXL"
 goi_result        <- build_gene_dataset_jaccard(GENE_OF_INT, all_top_cci_sets)
 goi_jaccard_mat   <- goi_result$dist_mat

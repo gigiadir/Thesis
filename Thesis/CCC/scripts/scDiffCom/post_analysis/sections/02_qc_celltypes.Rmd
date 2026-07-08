@@ -3,7 +3,7 @@
 ```{r celltype-noise-diagnostics}
 # Uses .malignant.orig (all interactions, before unknown-celltype removal)
 # to quantify how much "other/unknown/equivocal" noise each dataset contains.
-QC_OUTPUT_DIR <- "~/Thesis/CCC/outputs/scDiffCom/plots/v2/qualityCheck"
+QC_OUTPUT_DIR <- "~/Thesis/CCC/outputs/scDiffCom/plots/v6/qualityCheck"
 dir.create(QC_OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 malignant_orig_catalog <- .hnsc_malignant_orig_catalog()
@@ -189,11 +189,11 @@ qc_interactions$Dataset <- factor(qc_interactions$Dataset,
 
 # Aggregate: count interactions per Dataset × EMITTER × RECEIVER
 qc_counts <- qc_interactions %>%
-  count(Dataset, EMITTER, RECEIVER, name = "n_interactions")
+  dplyr::count(Dataset, EMITTER, RECEIVER, name = "n_interactions")
 
 # Consistent cell-type order (most active first) for both axes
 ct_order <- qc_interactions %>%
-  count(EMITTER, name = "n") %>%
+  dplyr::count(EMITTER, name = "n") %>%
   arrange(desc(n)) %>%
   pull(EMITTER) %>%
   unique()
@@ -234,56 +234,112 @@ ggsave(file.path(QC_OUTPUT_DIR, "qc_celltype_heatmap.png"),
        plot = p_qc_heatmap, width = 18, height = 10, dpi = 300)
 message("Saved qc_celltype_heatmap.png")
 
-# ── 3. Sankey / Alluvial Diagram (aggregated across all datasets) ─────────────
-TOP_PAIRS_SANKEY <- 20   # keep top N Emitter→Receiver pairs
+# ── 3. Sankey / Alluvial Diagram (filtered malignant, all pairs) ──────────────
+malignant_catalog <- stats::setNames(
+  lapply(HNSC_DATASETS, function(ds) get(paste0(ds, ".malignant"), inherits = TRUE)),
+  HNSC_DATASETS
+)
 
-qc_alluvial_data <- qc_interactions %>%
-  count(EMITTER, RECEIVER, name = "n_interactions") %>%
-  arrange(desc(n_interactions)) %>%
-  slice_head(n = TOP_PAIRS_SANKEY)
+sankey_interactions <- purrr::imap_dfr(malignant_catalog, function(gene_list, ds_full) {
+  ds_short <- noise_ds_meta$ds_short[noise_ds_meta$ds_full == ds_full]
+  purrr::imap_dfr(gene_list, function(df, gene) {
+    if (is.null(df) || nrow(df) == 0) return(NULL)
+    data.frame(
+      Dataset  = ds_short,
+      Gene     = gene,
+      EMITTER  = df$EMITTER_CELLTYPE,
+      RECEIVER = df$RECEIVER_CELLTYPE,
+      stringsAsFactors = FALSE
+    )
+  })
+})
+sankey_interactions$Dataset <- factor(sankey_interactions$Dataset,
+                                      levels = noise_ds_meta$ds_short)
 
-# sqrt(n) transform: compresses Epithelial's dominant band while keeping
-# smaller categories (Hematopoietic, Myeloid, …) visually distinct.
-p_qc_sankey <- ggplot(
-  qc_alluvial_data,
-  aes(axis1 = EMITTER, axis2 = RECEIVER, y = sqrt(n_interactions))
-) +
-  # Sigmoid curves look cleaner than the default splines
-  geom_alluvium(aes(fill = EMITTER), width = 1/10, alpha = 0.65,
-                curve_type = "sigmoid") +
-  geom_stratum(width = 1/4, fill = "grey92", colour = "grey55",
-               linewidth = 0.4) +
-  # hjust = "outward" floats every label outside its stratum box so labels
-  # for small categories don't collide with the flows or each other.
-  geom_text(
-    stat     = "stratum",
-    aes(label = after_stat(stratum)),
-    hjust    = "outward",
-    size     = 3.2,
-    fontface = "bold"
-  ) +
-  scale_x_discrete(
-    limits = c("Emitter", "Receiver"),
-    expand = c(0.35, 0.35)   # extra horizontal room for outward labels
-  ) +
-  theme_void(base_size = 13) +
-  theme(
-    axis.text.x     = element_text(face = "bold", size = 13,
-                                   margin = margin(b = 6)),
-    plot.title      = element_text(face = "bold", hjust = 0.5),
-    plot.subtitle   = element_text(size = 10, colour = "grey40", hjust = 0.5),
-    plot.margin     = margin(12, 40, 12, 40),
-    legend.position = "none"
-  ) +
-  labs(
-    title    = sprintf(
-      "Cell-Type Interaction Flow — Top %d Emitter→Receiver Pairs (All Datasets)",
-      TOP_PAIRS_SANKEY)  )
+sankey_ct_order <- sankey_interactions %>%
+  dplyr::count(EMITTER, name = "n") %>%
+  arrange(desc(n)) %>%
+  pull(EMITTER) %>%
+  unique()
+
+SANKEY_SUBTITLE <- "Tumor-involved interactions only"
+SANKEY_GENE_FILTER <- list(Kurten = "AXL")   # per-dataset gene subset (NULL = all genes)
+
+prep_sankey_data <- function(interactions) {
+  interactions %>%
+    dplyr::count(EMITTER, RECEIVER, name = "n_interactions") %>%
+    arrange(desc(n_interactions))
+}
+
+# sqrt(n) transform: compresses dominant bands while keeping smaller categories visible.
+STRATUM_WIDTH <- 1/2
+make_qc_sankey_plot <- function(alluvial_data, ct_order, title, subtitle = SANKEY_SUBTITLE) {
+  alluvial_data <- alluvial_data %>%
+    mutate(
+      EMITTER  = factor(EMITTER,  levels = rev(ct_order)),
+      RECEIVER = factor(RECEIVER, levels = ct_order)
+    )
+  ggplot(alluvial_data, aes(axis1 = EMITTER, axis2 = RECEIVER, y = sqrt(n_interactions))) +
+    geom_alluvium(aes(fill = EMITTER), width = STRATUM_WIDTH / 4, alpha = 0.65,
+                  curve_type = "sigmoid") +
+    geom_stratum(width = STRATUM_WIDTH, fill = "grey92", colour = "grey55",
+                 linewidth = 0.4) +
+    geom_text(
+      stat     = "stratum",
+      aes(label = after_stat(stratum)),
+      size     = 3,
+      fontface = "bold",
+      color    = "black"
+    ) +
+    scale_x_discrete(limits = c("Emitter", "Receiver"), expand = c(0.18, 0.18)) +
+    coord_cartesian(clip = "off") +
+    theme_void(base_size = 13) +
+    theme(
+      axis.text.x     = element_text(face = "bold", size = 13, margin = margin(b = 6)),
+      plot.title      = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle   = element_text(size = 10, colour = "grey40", hjust = 0.5),
+      plot.margin     = margin(0.5, 1, 0.5, 1, unit = "cm"),
+      legend.position = "none"
+    ) +
+    labs(title = title, subtitle = subtitle)
+}
+
+sankey_alluvial_data <- prep_sankey_data(sankey_interactions)
+p_qc_sankey <- make_qc_sankey_plot(
+  sankey_alluvial_data, sankey_ct_order,
+  title = "Cell-Type Interaction Flow — All Emitter→Receiver Pairs (All Datasets)"
+)
 
 print(p_qc_sankey)
 ggsave(file.path(QC_OUTPUT_DIR, "qc_celltype_sankey.png"),
-       plot = p_qc_sankey, width = 14, height = 9, dpi = 300)
+       plot = p_qc_sankey, width = 16, height = 10, dpi = 300)
 message("Saved qc_celltype_sankey.png")
+
+purrr::walk(levels(sankey_interactions$Dataset), function(ds) {
+  ds_interactions <- sankey_interactions %>% filter(Dataset == ds)
+  gene_filter <- SANKEY_GENE_FILTER[[ds]]
+  if (!is.null(gene_filter)) {
+    ds_interactions <- ds_interactions %>% filter(Gene == gene_filter)
+  }
+  ds_ct_order <- ds_interactions %>%
+    dplyr::count(EMITTER, name = "n") %>%
+    arrange(desc(n)) %>%
+    pull(EMITTER) %>%
+    unique()
+  ds_alluvial <- prep_sankey_data(ds_interactions)
+  title_suffix <- if (!is.null(gene_filter)) {
+    sprintf("%s, %s only", ds, gene_filter)
+  } else {
+    ds
+  }
+  p_ds <- make_qc_sankey_plot(
+    ds_alluvial, ds_ct_order,
+    title = sprintf("Cell-Type Interaction Flow — All Emitter→Receiver Pairs (%s)", title_suffix)
+  )
+  out_path <- file.path(QC_OUTPUT_DIR, paste0("qc_celltype_sankey_", ds, ".png"))
+  ggsave(out_path, plot = p_ds, width = 16, height = 10, dpi = 300)
+  message("Saved ", basename(out_path))
+})
 
 # ── 4. Top-10 Summary Table ───────────────────────────────────────────────────
 qc_top10 <- qc_interactions %>%

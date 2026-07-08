@@ -1,0 +1,15 @@
+# AXL (gene of interest) boxplot
+
+```{r axl-boxplot}
+plot_goi_boxplot(
+  malignant_list  = TARGET.malignant,
+  gene            = GENE_OF_INT,
+  dataset_label   = TARGET_DATASET,
+  dataset_short   = DATASET_SHORT,
+  output_dir      = WITHIN_COHORT_OUTPUT_DIR,
+  malignant_label = "H&N Cancer",
+  top_pairs_to_label = BOXPLOT_TOP_PAIRS_TO_LABEL,
+  plot_width         = BOXPLOT_WIDTH,
+  plot_height        = BOXPLOT_HEIGHT
+)
+```

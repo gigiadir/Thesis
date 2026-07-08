@@ -1,0 +1,12 @@
+# Gene-gene LRI heatmap and UMAP
+
+```{r gene-gene-lri}
+lri_results <- plot_gene_gene_lri_heatmap_umap(
+  malignant_list = TARGET.malignant,
+  dataset_label  = TARGET_DATASET,
+  output_dir     = WITHIN_COHORT_OUTPUT_DIR,
+  min_genes      = MIN_GENES_PER_LRI,
+  k_clusters     = K_CLUSTERS,
+  umap_seed      = UMAP_SEED
+)
+```
