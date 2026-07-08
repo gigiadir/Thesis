@@ -17,9 +17,9 @@ cci_union_per_cohort <- function(malignant_by_cohort) {
 gene_logfc_vector <- function(df, J) {
   vec <- setNames(rep(NA_real_, length(J)), J)
   if (nrow(df) == 0) return(vec)
-  agg <- df %>%
-    group_by(CCI) %>%
-    summarise(LOGFC = mean(LOGFC, na.rm = TRUE), .groups = "drop")
+  df <- df[df$CCI %in% J, , drop = FALSE]
+  if (nrow(df) == 0) return(vec)
+  agg <- aggregate(LOGFC ~ CCI, data = df, FUN = function(x) mean(x, na.rm = TRUE))
   vec[agg$CCI] <- agg$LOGFC
   vec
 }

@@ -56,3 +56,4 @@ knit.atlas.section <- function(section_file, atlas_dir = get("ATLAS_DIR", envir 
   if (!file.exists(path)) stop("Section not found: ", path)
   knitr::knit(path, envir = .GlobalEnv)
 }
+

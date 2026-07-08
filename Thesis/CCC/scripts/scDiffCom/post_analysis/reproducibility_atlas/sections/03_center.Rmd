@@ -25,7 +25,7 @@ Xtilde <- lapply(cohorts, function(ds) {
 names(Xtilde) <- cohorts
 
 set.seed(cfg$seed)
-hk_genes <- sample(gene_universe, min(20, length(gene_universe)))
+hk_genes <- sample(gene_universe, min(75, length(gene_universe)))
 
 centering_baseline <- purrr::imap_dfr(cohorts, function(ds, idx) {
   mat <- X[[ds]]
