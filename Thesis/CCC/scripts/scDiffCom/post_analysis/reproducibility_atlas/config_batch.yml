@@ -1,5 +1,7 @@
+# Batch/SGE config — output_dir on GPFS (no Dropbox symlink).
+# Interactive runs use config.yml; Stage 5 qsub uses this file by default.
 base_results_dir: "~/CCC-scDiffCom/results/split-by-rank-genes-v2"
-output_dir: "~/Thesis/CCC/outputs/scDiffCom/reproducibility_atlas/v1-v2"
+output_dir: "~/CCC-scDiffCom/results/reproducibility_atlas/v1-v2"
 cohorts:
   - Kurten_HNSC
   - Puram_HNSC

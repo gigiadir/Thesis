@@ -106,6 +106,10 @@ Thesis/Figure 1 - Bulk/outputs
 !Thesis/CCC/scripts/scDiffCom/post_analysis/reproducibility_atlas/R/
 !Thesis/CCC/scripts/scDiffCom/post_analysis/reproducibility_atlas/R/**
 
+# Reproducibility atlas validation R helpers (override global R/ ignore)
+!Thesis/CCC/scripts/scDiffCom/post_analysis/reproducibility_atlas/validation/R/
+!Thesis/CCC/scripts/scDiffCom/post_analysis/reproducibility_atlas/validation/R/**
+
 # Preprocessing-checks R helpers (override global R/ ignore)
 !Thesis/CCC/scripts/scDiffCom/preprocess/preprocessing_checks/R/
 !Thesis/CCC/scripts/scDiffCom/preprocess/preprocessing_checks/R/**

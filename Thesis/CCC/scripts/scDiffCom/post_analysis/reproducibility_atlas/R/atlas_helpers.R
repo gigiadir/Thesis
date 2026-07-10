@@ -103,6 +103,7 @@ shuffle_genes_within_cohort <- function(X) {
 }
 
 ensure_idr <- function() {
+  suppressPackageStartupMessages(library(dplyr))
   if (!requireNamespace("idr", quietly = TRUE)) {
     if (!requireNamespace("BiocManager", quietly = TRUE)) {
       stop("Package 'idr' required. Install with: BiocManager::install('idr')")
@@ -115,9 +116,11 @@ ensure_idr <- function() {
 gene_rank_values <- function(df, ccis, ranking = "signed") {
   vec <- setNames(rep(NA_real_, length(ccis)), ccis)
   if (nrow(df) == 0) return(vec)
-  agg <- df %>%
-    group_by(CCI) %>%
-    summarise(LOGFC = mean(LOGFC, na.rm = TRUE), .groups = "drop")
+  agg <- dplyr::summarise(
+    dplyr::group_by(df, CCI),
+    LOGFC = mean(LOGFC, na.rm = TRUE),
+    .groups = "drop"
+  )
   vals <- agg$LOGFC
   if (ranking == "magnitude") vals <- abs(vals)
   vec[agg$CCI] <- vals
