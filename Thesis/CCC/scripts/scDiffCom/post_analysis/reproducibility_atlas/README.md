@@ -6,7 +6,7 @@
 |------|---------|
 | [`index.Rmd`](index.Rmd) | Interactive driver — run section chunks in order |
 | [`sections/*.Rmd`](sections/) | **Stage code lives here** (inspect, vocab, tensor, …) |
-| [`R/atlas_helpers.R`](R/atlas_helpers.R) | Shared functions (ReproScore, IDR, tensor helpers) |
+| [`R/atlas_helpers.R`](R/atlas_helpers.R) | Shared functions (ReproScore, tensor helpers) |
 | [`R/stage_05_nulls.R`](R/stage_05_nulls.R) | Stage 5 null permutations (shared by Rmd + batch script) |
 | [`R/00_atlas_setup.R`](R/00_atlas_setup.R) | Session init, checkpoints, `knit.atlas.section()` |
 | [`run_stage_05_nulls.R`](run_stage_05_nulls.R) | Standalone Stage 5 batch driver (resumable) |
@@ -82,7 +82,7 @@ Logs: `$HOME/CCC-scDiffCom/results/reproducibility_atlas/logs/atlas_nulls.o*` / 
 | `stage05_atlas_env.rds` | Checkpoint for Stage 6 |
 | `null_perm_checkpoint.rds` | Temporary resume file (deleted on success) |
 
-After Stage 5: `Rscript run_atlas.R 6` or open `sections/06_idr.Rmd`.
+After Stage 5: `Rscript run_atlas.R 6` or open `sections/06_atlas.Rmd`.
 
 ### Sync Stage 5 outputs (batch → interactive)
 
@@ -107,3 +107,5 @@ Alternatively, if `null_perm_checkpoint.rds` still exists on GPFS, [`recover_sta
 [`config.yml`](config.yml) — copied to `results/config_used.yml` on first run.
 
 Stage 5 keys: `n_perm`, `null_checkpoint_every`, `null_max_cores`, `seed`.
+
+Stage 6 atlas membership: `shuffle_FDR < fdr_threshold` (default 0.05). ReproScore ranks members within the atlas.

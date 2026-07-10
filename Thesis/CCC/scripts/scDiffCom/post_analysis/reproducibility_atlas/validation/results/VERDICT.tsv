@@ -18,6 +18,5 @@ na_exchangeable	5	PASS	0.0014	|delta| <= 0.02	Null robust to NA structure
 pval_dist	5	PASS	0.411	uniform + spike at 0	Some real signal on null background 
 global_test	5	PASS	0	p < 0.05	Atlas-level reproducibility exists
 loco_stability	capstone	PASS	0.808	all LOCO rho > 0.8	Reproducibility not driven by one cohort
-reproscore_vs_idr	6	WARN		positive concordance	Near-zero concordance
 controls	7	WARN	pos_mean_rank=2,neg_mean_rank=1	positives high, negatives low	Known biology not ranking up; trust pipeline less
 enrichment	7	INFO	1	p < 0.05	No significant LRI enrichment; atlas may still be valid

@@ -3,7 +3,7 @@
 #
 #   Rscript run_atlas.R       # all sections
 #   Rscript run_atlas.R 3     # section 03_center.Rmd only
-#   Rscript run_atlas.R diag  # 08_diagnostics.Rmd
+#   Rscript run_atlas.R diag  # 07_diagnostics.Rmd
 
 ATLAS_DIR <- normalizePath(
   if (any(grepl("^--file=", commandArgs(trailingOnly = FALSE)))) {
@@ -22,9 +22,8 @@ section_files <- c(
   "03_center.Rmd",
   "04_reproscore.Rmd",
   "05_nulls.Rmd",
-  "06_idr.Rmd",
-  "07_atlas.Rmd",
-  "08_diagnostics.Rmd"
+  "06_atlas.Rmd",
+  "07_diagnostics.Rmd"
 )
 
 stage_arg <- commandArgs(trailingOnly = TRUE)[1]
@@ -32,7 +31,7 @@ run_all <- is.na(stage_arg) || stage_arg == "" || stage_arg == "all"
 run_diag <- identical(stage_arg, "diag")
 
 if (run_diag) {
-  knit.atlas.section("08_diagnostics.Rmd")
+  knit.atlas.section("07_diagnostics.Rmd")
   message("Diagnostics complete.")
   quit(save = "no")
 }
@@ -41,8 +40,8 @@ if (run_all) {
   to_run <- section_files
 } else {
   stage_num <- as.integer(stage_arg)
-  if (is.na(stage_num) || stage_num < 0 || stage_num > 7) {
-    stop("Stage must be 0–7, 'all', or 'diag'. Got: ", stage_arg)
+  if (is.na(stage_num) || stage_num < 0 || stage_num > 6) {
+    stop("Stage must be 0–6, 'all', or 'diag'. Got: ", stage_arg)
   }
   to_run <- section_files[stage_num + 1]
   message("Running: ", to_run)

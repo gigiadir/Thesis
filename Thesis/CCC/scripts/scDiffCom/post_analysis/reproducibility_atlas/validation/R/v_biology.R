@@ -1,43 +1,4 @@
-# Biological validation — IDR concordance, controls, enrichment.
-
-compute_idr_summary <- function(ctx) {
-  malignant_by_cohort <- ctx$malignant_by_cohort
-  cohorts <- ctx$cohorts
-  gene_universe <- ctx$gene_universe
-  idx_pairs <- ctx$cohort_pairs_idx
-  pair_labels <- ctx$pair_labels
-  ranking <- ctx$cfg$idr_ranking
-  threshold <- ctx$cfg$idr_threshold
-  n_pairs <- length(idx_pairs)
-
-  ensure_idr()
-
-  idr_pass_fraction <- vapply(gene_universe, function(g) {
-    ccis_g <- sort(unique(unlist(lapply(cohorts, function(ds) {
-      malignant_by_cohort[[ds]][[g]]$CCI
-    }))))
-    if (length(ccis_g) < 10) return(NA_real_)
-
-    vecs <- lapply(cohorts, function(ds) {
-      gene_rank_values(malignant_by_cohort[[ds]][[g]], ccis = ccis_g, ranking = ranking)
-    })
-    cci_pair_pass <- setNames(rep(0L, length(ccis_g)), ccis_g)
-    for (p in seq_len(n_pairs)) {
-      a <- idx_pairs[[p]][1]
-      b <- idx_pairs[[p]][2]
-      res <- run_pairwise_idr(vecs[[a]], vecs[[b]], threshold = threshold)
-      if (length(res$pass) > 0) cci_pair_pass[res$pass] <- cci_pair_pass[res$pass] + 1L
-    }
-    pass_frac_by_cci <- cci_pair_pass / n_pairs
-    mean(pass_frac_by_cci >= 0.5)
-  }, numeric(1))
-
-  data.frame(
-    gene = gene_universe,
-    idr_pass_fraction = idr_pass_fraction,
-    stringsAsFactors = FALSE
-  )
-}
+# Biological validation — controls and enrichment.
 
 DEFAULT_POSITIVE_CONTROLS <- c(
   "TGFB1", "TGFB2", "TGFB3", "TGFBR1", "TGFBR2",
@@ -51,42 +12,6 @@ DEFAULT_NEGATIVE_CONTROLS <- c(
 run_v_biology <- function(ctx, validation_dir, controls = NULL) {
   repro_df <- ctx$repro_df
   gene_universe <- ctx$gene_universe
-
-  if (!requireNamespace("dplyr", quietly = TRUE)) {
-    stop("Package 'dplyr' required for IDR validation")
-  }
-  suppressPackageStartupMessages(library(dplyr))
-
-  idr_df <- compute_idr_summary(ctx)
-  merged <- merge(repro_df, idr_df, by = "gene")
-  rho <- cor(merged$ReproScore, merged$idr_pass_fraction,
-             method = "spearman", use = "complete.obs")
-
-  png(file.path(validation_dir, "results", "reproscore_vs_idr.png"),
-      width = 600, height = 500)
-  plot(merged$idr_pass_fraction, merged$ReproScore, pch = 16, cex = 0.6,
-       xlab = "IDR pass fraction", ylab = "ReproScore",
-       main = sprintf("ReproScore vs IDR (rho=%.3f)", rho))
-  abline(h = 0.5, col = "grey", lty = 2)
-  dev.off()
-
-  merged$repro_rank <- rank(-merged$ReproScore, ties.method = "average")
-  merged$idr_rank <- rank(-merged$idr_pass_fraction, ties.method = "average")
-  merged$rank_diff <- abs(merged$repro_rank - merged$idr_rank)
-  disagree <- merged[order(-merged$rank_diff), ][seq_len(min(20, nrow(merged))), ]
-  readr::write_tsv(disagree[, c("gene", "ReproScore", "idr_pass_fraction", "repro_rank", "idr_rank")],
-                   file.path(validation_dir, "results", "method_disagreement.tsv"))
-
-  if (is.finite(rho) && rho > 0.2) {
-    append_verdict(validation_dir, "reproscore_vs_idr", 6, "PASS", round(rho, 4),
-                   "positive concordance", "Two methods agree")
-  } else if (is.finite(rho) && rho > 0) {
-    append_verdict(validation_dir, "reproscore_vs_idr", 6, "WARN", round(rho, 4),
-                   "positive concordance", "Weak concordance; methods may measure different things")
-  } else {
-    append_verdict(validation_dir, "reproscore_vs_idr", 6, "WARN", round(rho, 4),
-                   "positive concordance", "Near-zero concordance")
-  }
 
   if (is.null(controls)) {
     pos <- intersect(DEFAULT_POSITIVE_CONTROLS, gene_universe)
@@ -123,7 +48,19 @@ run_v_biology <- function(ctx, validation_dir, controls = NULL) {
                    "Known biology not ranking up; trust pipeline less")
   }
 
-  atlas_genes <- repro_df$gene[repro_df$ReproScore > ctx$cfg$reproscore_threshold]
+  atlas_genes <- {
+    fdr_thr <- if (!is.null(ctx$cfg$fdr_threshold)) ctx$cfg$fdr_threshold else 0.05
+    repro <- if (!is.null(ctx$repro_with_nulls) && "shuffle_FDR" %in% names(ctx$repro_with_nulls)) {
+      ctx$repro_with_nulls
+    } else {
+      repro_df
+    }
+    if ("shuffle_FDR" %in% names(repro)) {
+      repro$gene[repro$shuffle_FDR < fdr_thr]
+    } else {
+      repro$gene[repro$ReproScore > ctx$cfg$reproscore_threshold]
+    }
+  }
   if (requireNamespace("scDiffCom", quietly = TRUE)) {
     lri_go <- scDiffCom::LRI_human$LRI_curated_GO
     if (!is.null(lri_go) && nrow(lri_go) > 0) {
@@ -132,7 +69,6 @@ run_v_biology <- function(ctx, validation_dir, controls = NULL) {
       bg_in_sig <- sum(gene_universe %in% sig_genes)
       n_atlas <- length(atlas_genes)
       n_bg <- length(gene_universe)
-      n_sig <- length(sig_genes)
       expected <- n_atlas * bg_in_sig / n_bg
       p_val <- stats::phyper(atlas_in_sig - 1, bg_in_sig, n_bg - bg_in_sig, n_atlas, lower.tail = FALSE)
 

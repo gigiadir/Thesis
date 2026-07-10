@@ -8,15 +8,13 @@ cohorts:
 gene_universe: intersection
 vocab_mode: intersection
 de_filter: true
-idr_ranking: signed
 eb_shrink: false
 n_perm: 1000
 null_checkpoint_every: 50
 null_max_cores: 50
-reproscore_threshold: 0.95
+reproscore_threshold: 0.95  # legacy; atlas membership uses shuffle_FDR only (Stage 6)
 fdr_threshold: 0.05
 min_genes_per_cci: 10
-idr_threshold: 0.05
 perm_block: null
 malignant_celltype:
   - Tumor

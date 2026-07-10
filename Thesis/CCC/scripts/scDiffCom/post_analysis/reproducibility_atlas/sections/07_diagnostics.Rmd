@@ -5,10 +5,21 @@ if (!exists("cfg")) {
   source(file.path("..", "R", "00_atlas_setup.R"))
   init.atlas.session(normalizePath("..", winslash = "/"))
 }
-if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(7)
+if (!exists("atlas_env")) {
+  results_dir <- file.path(cfg$output_dir, "results")
+  stage06 <- file.path(results_dir, "stage06_atlas_env.rds")
+  stage07 <- file.path(results_dir, "stage07_atlas_env.rds")
+  atlas_env <- if (file.exists(stage06)) {
+    load.atlas.checkpoint(6)
+  } else if (file.exists(stage07)) {
+    load.atlas.checkpoint(7)
+  } else {
+    stop("Missing atlas checkpoint (stage06 or legacy stage07) — run Stage 6 first.")
+  }
+}
 ```
 
-```{r stage-08}
+```{r stage-07-diag}
 output_dir <- atlas_env$output_dir
 diag_dir <- file.path(output_dir, "results", "diagnostics")
 dir.create(diag_dir, recursive = TRUE, showWarnings = FALSE)
@@ -80,10 +91,11 @@ readr::write_tsv(
 
 disagree <- atlas_env$repro_df %>%
   mutate(category = case_when(
-    ReproScore > cfg$reproscore_threshold & shuffle_FDR >= cfg$fdr_threshold ~
-      "high_ReproScore_high_shuffle_p_distinctive",
-    ReproScore <= cfg$reproscore_threshold & shuffle_FDR < cfg$fdr_threshold ~
-      "low_ReproScore_sig_null_investigate",
+    shuffle_FDR < cfg$fdr_threshold ~ "atlas_member_fdr_sig",
+    shuffle_FDR >= cfg$fdr_threshold & ReproScore > median(ReproScore, na.rm = TRUE) ~
+      "high_ReproScore_not_fdr_sig",
+    shuffle_FDR >= cfg$fdr_threshold & ReproScore <= median(ReproScore, na.rm = TRUE) ~
+      "low_ReproScore_not_fdr_sig",
     TRUE ~ "other"
   )) %>%
   left_join(module_tbl %>% select(gene, module), by = "gene")

@@ -18,7 +18,7 @@ We ask whether genes show a **reproducible CCI logFC pattern** across four indep
 
 ---
 
-## Data flow (Stages 0–5)
+## Data flow (Stages 0–7)
 
 ```
 Stage 0  Load & inspect     → 4 cohorts, 392-gene intersection
@@ -27,6 +27,8 @@ Stage 2  Tensor X            → X[cohort, gene, CCI] = mean LOGFC
 Stage 3  Centering           → X̃ = column-wise z-score per cohort
 Stage 4  ReproScore          → gene × gene Spearman → ReproScore
 Stage 5  Nulls               → gene-shuffle null, shuffle_FDR, global test
+Stage 6  Atlas assembly      → atlas_member = shuffle_FDR < fdr_threshold
+Stage 7  Diagnostics         → modules, heatmaps, disagreement tables
 ```
 
 ---
@@ -126,13 +128,7 @@ $$\text{ReproScore}(g) = \text{mean of } u_{a,b}(g) \text{ over 6 cohort pairs}$
 
 **Do not use `reproscore_threshold = 0.95`** — no gene exceeds 0.95 (max = 0.950).
 
-**Recommended (FDR-only):**
-
-```
-atlas_member := shuffle_FDR < 0.05
-```
-
-→ **52 genes** (ReproScore range 0.82–0.95 among these)
+**Implemented in Stage 6:** `atlas_member = shuffle_FDR < fdr_threshold` (52 genes at FDR < 0.05). ReproScore is used for ranking within members, not as a membership floor.
 
 **Optional strength filter:**
 
@@ -216,7 +212,6 @@ Proceed to atlas interpretation (52 FDR-significant genes)
 2. **Intersection vocabulary:** 2,401 CCIs — sparse NA structure (median ~72% NA per gene-cohort).
 3. **Per-gene FDR:** Underpowered with 4 cohorts; global test is the primary inferential claim.
 4. **ReproScore ≠ biology per se:** High score means cross-cohort CCI *pattern* consistency, not necessarily known cancer driver status.
-5. **IDR not used for membership:** IDR concordance was weak in validation; membership based on shuffle FDR only.
 
 ---
 

@@ -167,7 +167,7 @@ if (need("loco_stability")) {
   ctx <- run_v_loco(ctx, VALIDATION_DIR)
 }
 
-if (need("reproscore_vs_idr") || need("controls") || need("enrichment")) {
+if (need("controls") || need("enrichment")) {
   message("--- biology ---")
   ctx <- run_v_biology(ctx, VALIDATION_DIR, controls = NULL)
 }

@@ -11,7 +11,7 @@ Run chunks sequentially in RStudio, or knit the full notebook.
 
 Configuration: [`config.yml`](config.yml). Outputs: `cfg$output_dir/results/`.
 
-CLI equivalent: `Rscript run_atlas.R [0-7|diag]`.
+CLI equivalent: `Rscript run_atlas.R [0-6|diag]`.
 
 ```{r setup-atlas, include=FALSE}
 knitr::opts_chunk$set(
@@ -43,11 +43,8 @@ init.atlas.session(ATLAS_DIR)
 ```{r child = "sections/05_nulls.Rmd"}
 ```
 
-```{r child = "sections/06_idr.Rmd"}
+```{r child = "sections/06_atlas.Rmd"}
 ```
 
-```{r child = "sections/07_atlas.Rmd"}
-```
-
-```{r child = "sections/08_diagnostics.Rmd"}
+```{r child = "sections/07_diagnostics.Rmd"}
 ```

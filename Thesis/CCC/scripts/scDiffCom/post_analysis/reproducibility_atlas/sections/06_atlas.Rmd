@@ -1,24 +1,21 @@
-# Stage 7 — Atlas assembly
+# Stage 6 — Atlas assembly
 
 ```{r setup, include=FALSE}
 if (!exists("cfg")) {
   source(file.path("..", "R", "00_atlas_setup.R"))
   init.atlas.session(normalizePath("..", winslash = "/"))
 }
-if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(6)
+if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(5)
 ```
 
-```{r stage-07}
+```{r stage-06}
 output_dir <- atlas_env$output_dir
 
-message("Stage 7: assemble atlas")
+message("Stage 6: assemble atlas")
 
 atlas <- atlas_env$repro_df %>%
-  left_join(atlas_env$idr_df, by = "gene") %>%
   mutate(
-    atlas_member = ReproScore > cfg$reproscore_threshold &
-      shuffle_FDR < cfg$fdr_threshold &
-      !is.na(idr_pass_fraction)
+    atlas_member = shuffle_FDR < cfg$fdr_threshold
   )
 
 readr::write_csv(atlas, file.path(output_dir, "results", "atlas.csv"))
@@ -27,6 +24,6 @@ if (requireNamespace("arrow", quietly = TRUE)) {
 }
 
 atlas_env$atlas <- atlas
-save.atlas.checkpoint(atlas_env, 7)
+save.atlas.checkpoint(atlas_env, 6)
 sum(atlas$atlas_member, na.rm = TRUE)
 ```

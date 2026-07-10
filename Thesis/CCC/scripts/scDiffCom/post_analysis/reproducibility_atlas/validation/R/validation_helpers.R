@@ -3,7 +3,7 @@
 STAR_CHECKS <- c(
   "eff_n", "batch_collapse", "diag_visible", "reproscore_vs_n", "raw_gap",
   "null_centered", "na_exchangeable", "global_test", "loco_stability",
-  "reproscore_vs_idr", "fastpath_equiv"
+  "fastpath_equiv"
 )
 
 init_verdict_file <- function(validation_dir) {
