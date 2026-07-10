@@ -1,0 +1,29 @@
+# Stage 6 — Atlas assembly
+
+```{r setup, include=FALSE}
+if (!exists("cfg")) {
+  source(file.path("..", "R", "00_atlas_setup.R"))
+  init.atlas.session(normalizePath("..", winslash = "/"))
+}
+if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(5)
+```
+
+```{r stage-06}
+output_dir <- atlas_env$output_dir
+
+message("Stage 6: assemble atlas")
+
+atlas <- atlas_env$repro_df %>%
+  mutate(
+    atlas_member = shuffle_FDR < cfg$fdr_threshold
+  )
+
+readr::write_csv(atlas, file.path(output_dir, "results", "atlas.csv"))
+if (requireNamespace("arrow", quietly = TRUE)) {
+  arrow::write_parquet(atlas, file.path(output_dir, "results", "atlas.parquet"))
+}
+
+atlas_env$atlas <- atlas
+save.atlas.checkpoint(atlas_env, 6)
+sum(atlas$atlas_member, na.rm = TRUE)
+```

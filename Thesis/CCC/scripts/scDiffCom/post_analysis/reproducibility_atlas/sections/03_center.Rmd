@@ -1,0 +1,49 @@
+# Stage 3 — Cohort centering
+
+```{r setup, include=FALSE}
+if (!exists("cfg")) {
+  source(file.path("..", "R", "00_atlas_setup.R"))
+  init.atlas.session(normalizePath("..", winslash = "/"))
+}
+if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(2)
+```
+
+```{r stage-03}
+output_dir <- atlas_env$output_dir
+cohorts <- atlas_env$cohorts
+gene_universe <- atlas_env$gene_universe
+X <- atlas_env$X
+min_genes <- cfg$min_genes_per_cci
+
+message("Stage 3: cohort-centering")
+
+Xtilde <- lapply(cohorts, function(ds) {
+  res <- center_cohort_matrix(X[[ds]], min_genes = min_genes)
+  attr(res$mat, "zero_sd_dropped") <- res$zero_sd
+  res$mat
+})
+names(Xtilde) <- cohorts
+
+set.seed(cfg$seed)
+hk_genes <- sample(gene_universe, min(75, length(gene_universe)))
+
+centering_baseline <- purrr::imap_dfr(cohorts, function(ds, idx) {
+  mat <- X[[ds]]
+  m_hk <- colMeans(mat[hk_genes, , drop = FALSE], na.rm = TRUE)
+  m_all <- colMeans(mat, na.rm = TRUE)
+  finite <- is.finite(m_hk) & is.finite(m_all)
+  rho <- if (sum(finite) >= 3) cor(m_hk[finite], m_all[finite], method = "spearman") else NA_real_
+  data.frame(
+    cohort = ds, n_hk_genes = length(hk_genes), spearman_rho = rho,
+    flag_low_rho = is.finite(rho) && rho < 0.7, stringsAsFactors = FALSE
+  )
+})
+
+readr::write_tsv(centering_baseline, file.path(output_dir, "results", "centering_baseline_check.tsv"))
+saveRDS(Xtilde, file.path(output_dir, "results", "Xtilde.rds"))
+
+atlas_env$Xtilde <- Xtilde
+atlas_env$centering_baseline <- centering_baseline
+save.atlas.checkpoint(atlas_env, 3)
+centering_baseline
+```

@@ -1,0 +1,22 @@
+check_id	stage	status	value	expected	note
+eff_n	1	PASS	236.75	>30 (PASS), 15-30 (WARN), <15 (FAIL)	Adequate pairwise-complete CCI counts 
+vocab_comp	1	INFO	0.125	characterization	Vocabulary spread across celltype pairs 
+na_map	2	INFO	0.719	mean NA < 0.85 per cohort	NA fractions within expected range 
+logfc_scale	2	INFO	1.187	descriptive	Cohort LOGFC scales similar 
+dup_collapse	2	INFO	0	<0.10	Duplicate collapse fraction acceptable 
+batch_collapse	3	WARN	before=-0.018,after=-0.017	after silhouette < 0.2	Batch separation change ambiguous 
+cohort_means	3	INFO	-0.016	descriptive	Low cohort-mean correlation; centering load-bearing 
+center_moments	3	PASS	max|mean|=5.76e-16	mean~0, sd in [0.9,1.1]	Post-centering moments OK 
+diag_visible	4	PASS	0.172	mean(diag) > mean(off-diag)	Diagonal signal visible 
+reproscore_vs_n	4	WARN	0.2425	|rho| < 0.15	Moderate sparsity confounding 
+raw_gap	4	PASS	0.172	> 0	Same-vs-different gap positive 
+reproscore_dist	4	PASS	0.028	bimodal with right tail	Distribution shows signal structure 
+fastpath_equiv	5	PASS	0	< 1e-8 on paired-rank cor	Paired-rank Spearman matches cor() 
+fastpath_approx	5	INFO	0.0827	row-rank approx	Row-wise rank fast path ReproScore max diff 
+null_centered	5	PASS	0.4999	[0.48, 0.52]	Null well-formed, centered at 0.5 
+na_exchangeable	5	PASS	0.0014	|delta| <= 0.02	Null robust to NA structure 
+pval_dist	5	PASS	0.411	uniform + spike at 0	Some real signal on null background 
+global_test	5	PASS	0	p < 0.05	Atlas-level reproducibility exists
+loco_stability	capstone	PASS	0.808	all LOCO rho > 0.8	Reproducibility not driven by one cohort
+controls	7	WARN	pos_mean_rank=2,neg_mean_rank=1	positives high, negatives low	Known biology not ranking up; trust pipeline less
+enrichment	7	INFO	1	p < 0.05	No significant LRI enrichment; atlas may still be valid

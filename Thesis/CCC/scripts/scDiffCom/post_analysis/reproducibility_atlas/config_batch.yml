@@ -1,0 +1,25 @@
+# Batch/SGE config — output_dir on GPFS (no Dropbox symlink).
+# Interactive runs use config.yml; Stage 5 qsub uses this file by default.
+base_results_dir: "~/CCC-scDiffCom/results/split-by-rank-genes-v2"
+output_dir: "~/CCC-scDiffCom/results/reproducibility_atlas/v1-v2"
+cohorts:
+  - Kurten_HNSC
+  - Puram_HNSC
+  - Choi_HNSC
+  - Bill_HNSC
+gene_universe: intersection
+vocab_mode: intersection
+de_filter: true
+eb_shrink: false
+n_perm: 1000
+null_checkpoint_every: 50
+null_max_cores: 50
+reproscore_threshold: 0.95  # legacy; atlas membership uses shuffle_FDR only (Stage 6)
+fdr_threshold: 0.05
+min_genes_per_cci: 10
+perm_block: null
+malignant_celltype:
+  - Tumor
+seed: 42
+filter_unknown_celltypes: true
+atlas_provenance_note: "All 4 cohorts are HNSCC Atlas project subsets"

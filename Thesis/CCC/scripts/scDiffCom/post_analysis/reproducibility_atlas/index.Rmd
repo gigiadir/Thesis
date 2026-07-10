@@ -1,0 +1,50 @@
+---
+title: "Cross-Cohort CCI Reproducibility Atlas"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+Interactive, section-by-section driver for the reproducibility atlas pipeline.
+Run chunks sequentially in RStudio, or knit the full notebook.
+
+Configuration: [`config.yml`](config.yml). Outputs: `cfg$output_dir/results/`.
+
+CLI equivalent: `Rscript run_atlas.R [0-6|diag]`.
+
+```{r setup-atlas, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = TRUE,
+  warning = TRUE
+)
+
+ATLAS_DIR <- normalizePath(".", winslash = "/")
+source(file.path(ATLAS_DIR, "R/00_atlas_setup.R"))
+init.atlas.session(ATLAS_DIR)
+```
+
+```{r child = "sections/00_inspect.Rmd"}
+```
+
+```{r child = "sections/01_cci_vocabulary.Rmd"}
+```
+
+```{r child = "sections/02_build_tensor.Rmd"}
+```
+
+```{r child = "sections/03_center.Rmd"}
+```
+
+```{r child = "sections/04_reproscore.Rmd"}
+```
+
+```{r child = "sections/05_nulls.Rmd"}
+```
+
+```{r child = "sections/06_atlas.Rmd"}
+```
+
+```{r child = "sections/07_diagnostics.Rmd"}
+```

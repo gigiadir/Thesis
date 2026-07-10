@@ -1,0 +1,22 @@
+# Stage 5 — Nulls and significance
+
+```{r setup, include=FALSE}
+if (!exists("cfg")) {
+  source(file.path("..", "R", "00_atlas_setup.R"))
+  init.atlas.session(normalizePath("..", winslash = "/"))
+}
+if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(4)
+```
+
+```{r stage-05}
+source(file.path("..", "R", "stage_05_nulls.R"))
+
+out <- run_stage_05_nulls(
+  atlas_env = atlas_env,
+  cfg = cfg,
+  checkpoint_every = if (!is.null(cfg$null_checkpoint_every)) cfg$null_checkpoint_every else 50L,
+  max_cores = if (!is.null(cfg$null_max_cores)) cfg$null_max_cores else 50L
+)
+atlas_env <- out$atlas_env
+out$global_p
+```
