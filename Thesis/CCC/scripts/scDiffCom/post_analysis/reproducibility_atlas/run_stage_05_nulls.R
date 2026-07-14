@@ -71,6 +71,7 @@ if (!is.na(conda_lib) && nzchar(conda_lib) && dir.exists(conda_lib)) {
 }
 
 source(file.path(ATLAS_DIR, "R/atlas_helpers.R"))
+source(file.path(ATLAS_DIR, "R/stage_05_evt.R"))
 source(file.path(ATLAS_DIR, "R/stage_05_nulls.R"))
 
 opts <- parse_cli_args(commandArgs(trailingOnly = TRUE))

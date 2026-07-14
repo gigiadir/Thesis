@@ -13,10 +13,19 @@ de_filter: true
 eb_shrink: false
 n_perm: 1000
 null_checkpoint_every: 50
-null_max_cores: 50
-reproscore_threshold: 0.95  # legacy; atlas membership uses shuffle_FDR only (Stage 6)
+null_max_cores: 64          # deliberate cap for the Stage 5 qsub (-pe shared 64)
+reproscore_threshold: 0.95  # legacy; atlas membership uses evt_FDR (Stage 6)
 fdr_threshold: 0.05
 min_genes_per_cci: 10
+# --- Advisor R_g methodology ---
+rg_aggregate: median        # median (advisor) or mean of the <=6 pairwise Spearman rho
+min_cci_overlap: 10         # min jointly-finite CCIs for a pairwise correlation
+atlas_min_pairs: 1          # min computable cohort pairs for atlas membership
+# EVT / GPD tail calibration (Knijnenburg 2009)
+evt_n_exc: 250              # exceedances for the GPD tail fit
+evt_gof_alpha: 0.05         # Anderson-Darling GOF alpha (shrink n_exc by 10 on failure)
+evt_exceedance_min: 10      # empirical -> GPD switch (min null values >= obs)
+evt_gof_boot: 199           # parametric-bootstrap replicates for the AD GOF test
 perm_block: null
 malignant_celltype:
   - Tumor

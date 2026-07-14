@@ -3,13 +3,12 @@ script_path <- sub("^--file=", "", grep("^--file=", commandArgs(trailingOnly = F
 VALIDATION_DIR <- normalizePath(dirname(script_path), winslash = "/")
 ATLAS_DIR <- normalizePath(file.path(VALIDATION_DIR, ".."), winslash = "/")
 
-conda_lib <- Sys.getenv("R_LIBS_SITE", unset = NA_character_)
-if (!is.na(conda_lib) && nzchar(conda_lib) && dir.exists(conda_lib)) {
-  .libPaths(conda_lib)
-} else {
-  env_prefix <- path.expand("~/.conda/envs/scDiffComPipeline_env/lib/R/library")
-  if (dir.exists(env_prefix)) .libPaths(env_prefix)
-}
+.atlas_extra_libs <- c(
+  path.expand("~/R/x86_64-redhat-linux-gnu-library/4.6"),
+  "/gpfs0/bgu-ofircohen/group/R_packages/R_4.5.0"
+)
+.atlas_extra_libs <- .atlas_extra_libs[dir.exists(.atlas_extra_libs)]
+if (length(.atlas_extra_libs)) .libPaths(c(.libPaths(), .atlas_extra_libs))
 
 source(file.path(ATLAS_DIR, "R", "atlas_helpers.R"))
 source(file.path(VALIDATION_DIR, "R", "validation_helpers.R"))

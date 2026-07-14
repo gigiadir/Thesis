@@ -10,8 +10,11 @@ run_v_loco <- function(ctx, validation_dir) {
   Xtilde <- ctx$Xtilde
   cohorts <- ctx$cohorts
   genes <- ctx$repro_df$gene
-  full_scores <- ctx$repro_df$ReproScore
+  full_scores <- ctx$repro_df$Rg
   names(full_scores) <- genes
+
+  agg <- if (!is.null(ctx$repro$aggregate)) ctx$repro$aggregate else "median"
+  min_ov <- if (!is.null(ctx$cfg$min_cci_overlap)) ctx$cfg$min_cci_overlap else 10L
 
   loco_results <- list()
   loco_scores <- list()
@@ -20,8 +23,8 @@ run_v_loco <- function(ctx, validation_dir) {
     keep <- setdiff(cohorts, drop_c)
     Xsub <- Xtilde[keep]
     idx <- cohort_pairs(length(keep))
-    repro <- compute_repro(Xsub, idx)
-    scores <- repro$ReproScore
+    cm <- compute_pair_cor_matrices(Xsub, idx, min_overlap = min_ov)
+    scores <- compute_Rg_from_cormats(cm, aggregate = agg)$Rg
     names(scores) <- ctx$gene_universe
     loco_scores[[drop_c]] <- scores
 

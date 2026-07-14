@@ -1,2 +1,2 @@
 term	atlas_n	atlas_in_term	background_in_term	background_n	expected	p_value
-LRI_curated_signaling	0	0	49	392	0	1
+LRI_curated_signaling	41	7	49	392	5.125	0.23807811105356674

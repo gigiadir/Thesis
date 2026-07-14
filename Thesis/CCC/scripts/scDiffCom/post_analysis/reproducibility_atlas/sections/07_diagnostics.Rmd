@@ -50,17 +50,36 @@ if (requireNamespace("pheatmap", quietly = TRUE)) {
 
 hc <- hclust(as.dist(1 - mean_cor), method = "average")
 clusters <- cutree(hc, k = min(8, max(2, floor(nrow(mean_cor) / 20))))
+rd <- atlas_env$repro_df
 module_tbl <- data.frame(
   gene = rownames(mean_cor), module = clusters,
-  ReproScore = atlas_env$repro_df$ReproScore[match(rownames(mean_cor), atlas_env$repro_df$gene)],
+  Rg = rd$Rg[match(rownames(mean_cor), rd$gene)],
+  ReproScore = rd$ReproScore[match(rownames(mean_cor), rd$gene)],
   stringsAsFactors = FALSE
 )
 readr::write_tsv(module_tbl, file.path(diag_dir, "gene_modules.tsv"))
 
 module_summary <- module_tbl %>%
   group_by(module) %>%
-  summarise(n_genes = n(), mean_ReproScore = mean(ReproScore, na.rm = TRUE), .groups = "drop")
+  summarise(
+    n_genes = n(),
+    mean_Rg = mean(Rg, na.rm = TRUE),
+    mean_ReproScore = mean(ReproScore, na.rm = TRUE),
+    .groups = "drop"
+  )
 readr::write_tsv(module_summary, file.path(diag_dir, "module_summary.tsv"))
+
+# Pair-coverage reporting: how many cohort pairs contribute to each gene's R_g.
+coverage_tbl <- rd %>%
+  dplyr::count(n_pairs_computable, name = "n_genes") %>%
+  arrange(n_pairs_computable)
+readr::write_tsv(coverage_tbl, file.path(diag_dir, "pair_coverage.tsv"))
+
+# EVT calibration method breakdown (empirical vs GPD vs fallback).
+if (!is.null(rd$evt_method)) {
+  evt_method_tbl <- rd %>% dplyr::count(evt_method, name = "n_genes")
+  readr::write_tsv(evt_method_tbl, file.path(diag_dir, "evt_method_breakdown.tsv"))
+}
 
 Xtilde <- atlas_env$Xtilde
 cohorts <- atlas_env$cohorts
@@ -78,24 +97,29 @@ centroid_mats <- lapply(cohorts, function(ds) {
 })
 names(centroid_mats) <- cohorts
 
-module_repro <- compute_repro(centroid_mats, idx_pairs)
+module_min_overlap <- if (!is.null(cfg$min_cci_overlap)) cfg$min_cci_overlap else 10L
+module_agg <- if (!is.null(cfg$rg_aggregate)) cfg$rg_aggregate else "median"
+module_cor_mats <- compute_pair_cor_matrices(centroid_mats, idx_pairs, min_overlap = module_min_overlap)
+module_rg <- compute_Rg_from_cormats(module_cor_mats, aggregate = module_agg)
 readr::write_tsv(
   data.frame(
     module = paste0("module_", module_ids),
-    ReproScore = module_repro$ReproScore,
-    R_self = module_repro$R_self,
+    Rg = module_rg$Rg,
+    Rg_mean = module_rg$Rg_mean,
+    n_pairs_computable = module_rg$n_pairs_computable,
     stringsAsFactors = FALSE
   ),
   file.path(diag_dir, "module_reproscore.tsv")
 )
 
+fdr_col <- if (!is.null(atlas_env$repro_df$evt_FDR)) "evt_FDR" else "shuffle_FDR"
 disagree <- atlas_env$repro_df %>%
   mutate(category = case_when(
-    shuffle_FDR < cfg$fdr_threshold ~ "atlas_member_fdr_sig",
-    shuffle_FDR >= cfg$fdr_threshold & ReproScore > median(ReproScore, na.rm = TRUE) ~
-      "high_ReproScore_not_fdr_sig",
-    shuffle_FDR >= cfg$fdr_threshold & ReproScore <= median(ReproScore, na.rm = TRUE) ~
-      "low_ReproScore_not_fdr_sig",
+    .data[[fdr_col]] < cfg$fdr_threshold ~ "atlas_member_fdr_sig",
+    .data[[fdr_col]] >= cfg$fdr_threshold & Rg > median(Rg, na.rm = TRUE) ~
+      "high_Rg_not_fdr_sig",
+    .data[[fdr_col]] >= cfg$fdr_threshold & Rg <= median(Rg, na.rm = TRUE) ~
+      "low_Rg_not_fdr_sig",
     TRUE ~ "other"
   )) %>%
   left_join(module_tbl %>% select(gene, module), by = "gene")

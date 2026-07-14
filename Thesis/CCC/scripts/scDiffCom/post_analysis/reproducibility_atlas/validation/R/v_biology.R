@@ -25,7 +25,7 @@ run_v_biology <- function(ctx, validation_dir, controls = NULL) {
   all_ctrl <- c(controls$positive, controls$negative)
   ctrl_df <- repro_df[repro_df$gene %in% all_ctrl, ]
   ctrl_df$control_type <- ifelse(ctrl_df$gene %in% controls$positive, "positive", "negative")
-  ctrl_df$rank <- rank(-ctrl_df$ReproScore, ties.method = "average")
+  ctrl_df$rank <- rank(-ctrl_df$Rg, ties.method = "average")
   ctrl_df <- ctrl_df[order(ctrl_df$rank), ]
   readr::write_tsv(ctrl_df, file.path(validation_dir, "results", "control_ranks.tsv"))
 
@@ -50,15 +50,17 @@ run_v_biology <- function(ctx, validation_dir, controls = NULL) {
 
   atlas_genes <- {
     fdr_thr <- if (!is.null(ctx$cfg$fdr_threshold)) ctx$cfg$fdr_threshold else 0.05
-    repro <- if (!is.null(ctx$repro_with_nulls) && "shuffle_FDR" %in% names(ctx$repro_with_nulls)) {
+    repro <- if (!is.null(ctx$repro_with_nulls) &&
+                 any(c("evt_FDR", "shuffle_FDR") %in% names(ctx$repro_with_nulls))) {
       ctx$repro_with_nulls
     } else {
       repro_df
     }
-    if ("shuffle_FDR" %in% names(repro)) {
-      repro$gene[repro$shuffle_FDR < fdr_thr]
+    fdr_col <- if ("evt_FDR" %in% names(repro)) "evt_FDR" else if ("shuffle_FDR" %in% names(repro)) "shuffle_FDR" else NA
+    if (!is.na(fdr_col)) {
+      repro$gene[repro[[fdr_col]] < fdr_thr]
     } else {
-      repro$gene[repro$ReproScore > ctx$cfg$reproscore_threshold]
+      repro$gene[repro$Rg > 0]
     }
   }
   if (requireNamespace("scDiffCom", quietly = TRUE)) {

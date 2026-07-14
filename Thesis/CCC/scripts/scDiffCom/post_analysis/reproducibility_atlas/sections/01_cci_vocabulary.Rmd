@@ -15,11 +15,16 @@ output_dir <- atlas_env$output_dir
 cohorts <- atlas_env$cohorts
 malignant_by_cohort <- atlas_env$malignant_by_cohort
 
-message("Stage 1: build CCI vocabulary")
+message("Stage 1: build CCI vocabulary (dual-tier)")
+# Two-tier vocabulary (advisor methodology):
+#   * cci_by_cohort[[c]] = every DE CCI tested in cohort c -> CENTERING superset
+#                          (Stage 3 subtracts the cohort mean-gene profile over
+#                           this full set, so centering is unbiased).
+#   * J = intersection    -> ANALYSIS subset used for R_g correlation / scoring.
 cci_by_cohort <- cci_union_per_cohort(malignant_by_cohort)
 
 for (ds in cohorts) {
-  message(sprintf("  %s: %d unique DE CCIs", ds, length(cci_by_cohort[[ds]])))
+  message(sprintf("  %s: %d unique DE CCIs (centering superset)", ds, length(cci_by_cohort[[ds]])))
 }
 
 J_intersection <- Reduce(intersect, cci_by_cohort)
@@ -56,9 +61,13 @@ saveRDS(J, file.path(output_dir, "results", "J.rds"))
 saveRDS(na_mask, file.path(output_dir, "results", "vocab_na_mask.rds"))
 
 atlas_env$J <- J
+atlas_env$J_union <- J_union
 atlas_env$na_mask <- na_mask
 atlas_env$cci_by_cohort <- cci_by_cohort
 save.atlas.checkpoint(atlas_env, 1)
 
+message(sprintf("  Analysis vocabulary J = %d CCIs (%s); centering supersets = %s per cohort",
+                length(J), vocab_mode,
+                paste(vapply(cci_by_cohort, length, integer(1)), collapse = "/")))
 length(J)
 ```

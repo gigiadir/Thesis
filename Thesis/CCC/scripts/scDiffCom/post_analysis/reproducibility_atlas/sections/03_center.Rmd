@@ -12,23 +12,29 @@ if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(2)
 output_dir <- atlas_env$output_dir
 cohorts <- atlas_env$cohorts
 gene_universe <- atlas_env$gene_universe
-X <- atlas_env$X
-min_genes <- cfg$min_genes_per_cci
+X_full <- atlas_env$X_full
+J <- atlas_env$J
 
-message("Stage 3: cohort-centering")
+message("Stage 3: cohort mean-gene subtraction (full CCIs), then restrict to J")
 
-Xtilde <- lapply(cohorts, function(ds) {
-  res <- center_cohort_matrix(X[[ds]], min_genes = min_genes)
-  attr(res$mat, "zero_sd_dropped") <- res$zero_sd
-  res$mat
-})
+# Step 2 (advisor): subtract the cohort "mean gene" profile mu_c[j] from every
+# gene's vector, computed over ALL cohort-tested CCIs (unbiased centering). Mean
+# subtraction only — no SD scaling (Spearman is scale-invariant per vector, and
+# the advisor removes only the cohort-common additive signal).
+Xtilde_full <- lapply(cohorts, function(ds) subtract_cohort_mean_profile(X_full[[ds]]))
+names(Xtilde_full) <- cohorts
+
+# Restrict the centered tensor to the intersection J for downstream scoring, so
+# all cohorts share identical, aligned CCI columns.
+Xtilde <- lapply(cohorts, function(ds) Xtilde_full[[ds]][, J, drop = FALSE])
 names(Xtilde) <- cohorts
+assert_tensor_alignment(Xtilde, gene_universe, J, cohorts)
 
 set.seed(cfg$seed)
 hk_genes <- sample(gene_universe, min(75, length(gene_universe)))
 
 centering_baseline <- purrr::imap_dfr(cohorts, function(ds, idx) {
-  mat <- X[[ds]]
+  mat <- X_full[[ds]]
   m_hk <- colMeans(mat[hk_genes, , drop = FALSE], na.rm = TRUE)
   m_all <- colMeans(mat, na.rm = TRUE)
   finite <- is.finite(m_hk) & is.finite(m_all)
@@ -40,8 +46,10 @@ centering_baseline <- purrr::imap_dfr(cohorts, function(ds, idx) {
 })
 
 readr::write_tsv(centering_baseline, file.path(output_dir, "results", "centering_baseline_check.tsv"))
+saveRDS(Xtilde_full, file.path(output_dir, "results", "Xtilde_full.rds"))
 saveRDS(Xtilde, file.path(output_dir, "results", "Xtilde.rds"))
 
+atlas_env$Xtilde_full <- Xtilde_full
 atlas_env$Xtilde <- Xtilde
 atlas_env$centering_baseline <- centering_baseline
 save.atlas.checkpoint(atlas_env, 3)

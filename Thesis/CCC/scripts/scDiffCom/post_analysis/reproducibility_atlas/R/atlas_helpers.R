@@ -58,6 +58,15 @@ center_cohort_matrix <- function(mat, min_genes = 10, eps = 1e-8) {
   list(mat = centered, zero_sd = zero_sd)
 }
 
+# Advisor centering (Step 2): subtract the cohort "mean gene" profile from every
+# gene's CCI vector. Mean subtraction only (no SD scaling), computed over ALL
+# genes present per CCI column. NAs are preserved; all-NA columns are no-ops.
+subtract_cohort_mean_profile <- function(mat) {
+  mu <- colMeans(mat, na.rm = TRUE)
+  mu[!is.finite(mu)] <- 0
+  sweep(mat, 2L, mu, FUN = "-")
+}
+
 cohort_pairs <- function(n_cohorts) {
   combn(n_cohorts, 2, simplify = FALSE)
 }
@@ -100,4 +109,110 @@ compute_repro <- function(Xc, cohort_idx_pairs) {
 
 shuffle_genes_within_cohort <- function(X) {
   lapply(X, function(m) m[sample(nrow(m)), , drop = FALSE])
+}
+
+# ------------------------------------------------------------------------------
+# Advisor R_g machinery (Steps 3-5).
+#
+# For each cohort pair we build the full gene x gene Spearman matrix on the
+# centered, J-restricted tensor. Entry C[g, h] = Spearman(v_g^{c1}, v_h^{c2}).
+#   - diagonal C[g, g]      -> same-gene cross-cohort concordance (feeds R_g)
+#   - off-diagonal C[g, h]  -> different-gene concordance (feeds the null)
+# Pairwise entries with fewer than `min_overlap` jointly finite CCIs are set NA
+# so both the observed statistic and the cross-gene null share the same gating.
+# ------------------------------------------------------------------------------
+
+compute_pair_cor_matrices <- function(Xc, cohort_idx_pairs, min_overlap = 10) {
+  P <- length(cohort_idx_pairs)
+  mats <- vector("list", P)
+  for (p in seq_len(P)) {
+    a <- cohort_idx_pairs[[p]][1]
+    b <- cohort_idx_pairs[[p]][2]
+    Ma <- Xc[[a]]
+    Mb <- Xc[[b]]
+    C <- suppressWarnings(
+      stats::cor(t(Ma), t(Mb), method = "spearman", use = "pairwise.complete.obs")
+    )
+    if (is.finite(min_overlap) && min_overlap > 0) {
+      Fa <- matrix(as.numeric(is.finite(Ma)), nrow(Ma), ncol(Ma))
+      Fb <- matrix(as.numeric(is.finite(Mb)), nrow(Mb), ncol(Mb))
+      overlap <- Fa %*% t(Fb)
+      C[overlap < min_overlap] <- NA_real_
+    }
+    dimnames(C) <- list(rownames(Ma), rownames(Mb))
+    mats[[p]] <- C
+  }
+  mats
+}
+
+collapse_pairwise <- function(mat_G_by_P, aggregate = c("median", "mean")) {
+  aggregate <- match.arg(aggregate)
+  f <- if (aggregate == "median") stats::median else base::mean
+  apply(mat_G_by_P, 1L, function(v) {
+    v <- v[is.finite(v)]
+    if (!length(v)) NA_real_ else f(v)
+  })
+}
+
+# R_g = median (default) of a gene's <=6 same-gene pairwise Spearman correlations.
+compute_Rg_from_cormats <- function(cor_mats, aggregate = "median") {
+  G <- nrow(cor_mats[[1]])
+  s_self <- vapply(cor_mats, function(C) diag(C), numeric(G))
+  if (is.null(dim(s_self))) s_self <- matrix(s_self, nrow = G)
+  rownames(s_self) <- rownames(cor_mats[[1]])
+  list(
+    Rg = collapse_pairwise(s_self, aggregate),
+    Rg_mean = collapse_pairwise(s_self, "mean"),
+    pairwise_rho = s_self,
+    n_pairs_computable = rowSums(is.finite(s_self))
+  )
+}
+
+# Supplementary percentile statistic (self vs other genes) — kept for comparison.
+compute_reproscore_from_cormats <- function(cor_mats) {
+  G <- nrow(cor_mats[[1]])
+  P <- length(cor_mats)
+  U <- matrix(NA_real_, G, P)
+  s_self <- matrix(NA_real_, G, P)
+  for (p in seq_len(P)) {
+    C <- cor_mats[[p]]
+    s <- diag(C)
+    s_self[, p] <- s
+    U[, p] <- vapply(seq_len(G), function(g) {
+      bg <- C[g, -g]
+      bg <- bg[is.finite(bg)]
+      if (!is.finite(s[g]) || !length(bg)) return(NA_real_)
+      mean(s[g] > bg)
+    }, numeric(1))
+  }
+  list(
+    ReproScore = rowMeans(U, na.rm = TRUE),
+    R_self     = rowMeans(s_self, na.rm = TRUE),
+    frac_pairs = rowMeans(U > 0.95, na.rm = TRUE),
+    U          = U
+  )
+}
+
+# Draw a partner index g' != g for every gene (independent, with replacement).
+sample_cross_gene_partner <- function(G) {
+  partner <- sample.int(G, G, replace = TRUE)
+  repeat {
+    self <- which(partner == seq_len(G))
+    if (!length(self)) break
+    partner[self] <- sample.int(G, length(self), replace = TRUE)
+  }
+  partner
+}
+
+# One cross-gene null draw of the R_g vector: for each pair pick a random
+# different-gene partner and aggregate the sampled off-diagonal concordances.
+null_one_perm_Rg <- function(cor_mats, aggregate = "median") {
+  G <- nrow(cor_mats[[1]])
+  P <- length(cor_mats)
+  null_pair <- matrix(NA_real_, G, P)
+  for (p in seq_len(P)) {
+    partner <- sample_cross_gene_partner(G)
+    null_pair[, p] <- cor_mats[[p]][cbind(seq_len(G), partner)]
+  }
+  collapse_pairwise(null_pair, aggregate)
 }

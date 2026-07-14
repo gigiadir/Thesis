@@ -30,7 +30,7 @@ mkdir -p "${LOG_DIR}"
 LOG_OUT="${LOG_DIR}/atlas_nulls.o"
 LOG_ERR="${LOG_DIR}/atlas_nulls.e"
 
-NCORES="${NCORES:-8}"
+NCORES="${NCORES:-64}"
 SGE_PE="${SGE_PE:-shared}"
 N_PERM_ARG="${N_PERM_ARG:-}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"

@@ -12,6 +12,19 @@ ATLAS_DIR <- normalizePath(
   winslash = "/"
 )
 
+# Library resolution for stages 0-4 (run under system R 4.6):
+#   * group R_4.6.0 (default site lib) provides the Bioconductor / DE stack
+#     (edgeR, DESeq2, limma, NMF, data.table, tidyverse, ...).
+#   * scDiffCom is only built for R 4.5, so append the group R_4.5.0 lib last —
+#     it is pure-R and loads under 4.6 while its compiled deps resolve from 4.6.0.
+#   * the user lib holds SuperRanker.
+.atlas_extra_libs <- c(
+  path.expand("~/R/x86_64-redhat-linux-gnu-library/4.6"),
+  "/gpfs0/bgu-ofircohen/group/R_packages/R_4.5.0"
+)
+.atlas_extra_libs <- .atlas_extra_libs[dir.exists(.atlas_extra_libs)]
+if (length(.atlas_extra_libs)) .libPaths(c(.libPaths(), .atlas_extra_libs))
+
 source(file.path(ATLAS_DIR, "R/00_atlas_setup.R"))
 init.atlas.session(ATLAS_DIR)
 

@@ -68,8 +68,9 @@ run_v3_center <- function(ctx, validation_dir) {
                  if (mean_cor > 0.5) "High cohort-mean correlation; batch mostly additive"
                  else "Low cohort-mean correlation; centering load-bearing")
 
+  # Advisor centering is mean-subtraction only (no SD scaling): each retained CCI
+  # column of Xtilde must have (near) zero mean over genes; SD is NOT normalized.
   max_mean_dev <- 0
-  max_sd_dev <- 0
   min_genes <- ctx$cfg$min_genes_per_cci
   for (ds in cohorts) {
     mat <- Xtilde[[ds]]
@@ -78,23 +79,18 @@ run_v3_center <- function(ctx, validation_dir) {
       finite <- is.finite(vals)
       if (sum(finite) < min_genes) next
       mu <- mean(vals[finite])
-      sigma <- stats::sd(vals[finite])
-      if (!is.finite(sigma) || sigma == 0) next
       max_mean_dev <- max(max_mean_dev, abs(mu))
-      if (sigma < 0.9 || sigma > 1.1) {
-        max_sd_dev <- max(max_sd_dev, max(abs(sigma - 0.9), abs(sigma - 1.1)))
-      }
     }
   }
 
-  if (max_mean_dev > 1e-6 || max_sd_dev > 0) {
+  if (max_mean_dev > 1e-6) {
     append_verdict(validation_dir, "center_moments", 3, "FAIL",
-                   sprintf("max|mean|=%.2e,max_sd_dev=%.3f", max_mean_dev, max_sd_dev),
-                   "mean~0, sd in [0.9,1.1]", "NA-handling bug in per-column moments")
+                   sprintf("max|mean|=%.2e", max_mean_dev),
+                   "mean~0 (mean-subtraction)", "NA-handling bug in per-column mean")
   } else {
     append_verdict(validation_dir, "center_moments", 3, "PASS",
                    sprintf("max|mean|=%.2e", max_mean_dev),
-                   "mean~0, sd in [0.9,1.1]", "Post-centering moments OK")
+                   "mean~0 (mean-subtraction)", "Post-centering column means ~0")
   }
 
   ctx

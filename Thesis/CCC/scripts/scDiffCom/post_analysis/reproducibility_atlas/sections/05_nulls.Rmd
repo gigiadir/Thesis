@@ -9,6 +9,7 @@ if (!exists("atlas_env")) atlas_env <- load.atlas.checkpoint(4)
 ```
 
 ```{r stage-05}
+source(file.path("..", "R", "stage_05_evt.R"))
 source(file.path("..", "R", "stage_05_nulls.R"))
 
 out <- run_stage_05_nulls(

@@ -15,6 +15,7 @@ init.atlas.session <- function(atlas_dir = NULL) {
   source(file.path(post_analysis_dir, "R/01_load_filter.R"))
   source(file.path(post_analysis_dir, "config/hnsc_datasets.R"))
   source(file.path(atlas_dir, "R/atlas_helpers.R"))
+  source(file.path(atlas_dir, "R/stage_05_evt.R"))
 
   cfg <- yaml::read_yaml(file.path(atlas_dir, "config.yml"))
   cfg$base_results_dir <- path.expand(cfg$base_results_dir)
@@ -48,7 +49,16 @@ load.atlas.checkpoint <- function(stage_n, results_dir = get("results_dir", envi
   if (!file.exists(path)) {
     stop("Missing checkpoint: ", path, " — run the previous section first.")
   }
-  readRDS(path)
+  atlas_env <- readRDS(path)
+  # Batch runs (Stage 5 qsub) persist output_dir as the GPFS batch path; realign it
+  # to the current session's config so downstream sections read/write consistently.
+  if (exists("cfg", envir = .GlobalEnv)) {
+    session_out <- get("cfg", envir = .GlobalEnv)$output_dir
+    if (!is.null(session_out) && (is.list(atlas_env) || is.environment(atlas_env))) {
+      atlas_env$output_dir <- session_out
+    }
+  }
+  atlas_env
 }
 
 knit.atlas.section <- function(section_file, atlas_dir = get("ATLAS_DIR", envir = .GlobalEnv)) {

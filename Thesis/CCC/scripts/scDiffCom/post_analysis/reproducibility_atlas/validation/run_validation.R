@@ -62,14 +62,16 @@ script_path <- sub("^--file=", "", grep("^--file=", commandArgs(trailingOnly = F
 VALIDATION_DIR <- normalizePath(dirname(script_path), winslash = "/")
 ATLAS_DIR <- normalizePath(file.path(VALIDATION_DIR, ".."), winslash = "/")
 
-# Prefer conda env libraries over site-wide R 4.6 packages (ABI mismatch).
-conda_lib <- Sys.getenv("R_LIBS_SITE", unset = NA_character_)
-if (!is.na(conda_lib) && nzchar(conda_lib) && dir.exists(conda_lib)) {
-  .libPaths(conda_lib)
-} else {
-  env_prefix <- path.expand("~/.conda/envs/scDiffComPipeline_env/lib/R/library")
-  if (dir.exists(env_prefix)) .libPaths(env_prefix)
-}
+# Library resolution for system R 4.6 (mirror run_atlas.R):
+#   * group R_4.6.0 (default site lib) provides the Bioconductor / DE stack.
+#   * scDiffCom is only built for R 4.5, so append the group R_4.5.0 lib last.
+#   * the user lib holds SuperRanker.
+.atlas_extra_libs <- c(
+  path.expand("~/R/x86_64-redhat-linux-gnu-library/4.6"),
+  "/gpfs0/bgu-ofircohen/group/R_packages/R_4.5.0"
+)
+.atlas_extra_libs <- .atlas_extra_libs[dir.exists(.atlas_extra_libs)]
+if (length(.atlas_extra_libs)) .libPaths(c(.libPaths(), .atlas_extra_libs))
 
 source(file.path(ATLAS_DIR, "R", "atlas_helpers.R"))
 source(file.path(VALIDATION_DIR, "R", "validation_helpers.R"))
@@ -151,8 +153,8 @@ if (opts$through %in% c("gate_b", "all")) {
   } else if (!is.na(decision$null_centered) && decision$null_centered == "PASS" &&
              !is.na(decision$raw_gap) && decision$raw_gap == "FAIL") {
     message("  null OK but no signal upstream -> revisit Stage 1 vocabulary / centering")
-  } else if (!is.na(decision$reproscore_vs_n) && decision$reproscore_vs_n == "FAIL") {
-    message("  reproscore_vs_n FAIL -> add min-n floor and rerun from Stage 4")
+  } else if (!is.na(decision$Rg_vs_n) && decision$Rg_vs_n == "FAIL") {
+    message("  Rg_vs_n FAIL -> add min-n floor and rerun from Stage 4")
   } else if (!is.na(decision$global_test) && decision$global_test == "PASS") {
     message("  all key checks PASS -> proceed to LOCO + biology")
   } else if (!ctx$stage5_complete) {

@@ -32,27 +32,30 @@ run_v5_nulls <- function(ctx, validation_dir) {
 
   png(file.path(validation_dir, "results", "null_center_hist.png"),
       width = 600, height = 500)
-  hist(as.numeric(null_repro), breaks = 50, main = "Null ReproScore distribution",
-       xlab = "Null ReproScore", col = "grey70", border = "white")
-  abline(v = 0.5, col = "red", lwd = 2)
+  hist(as.numeric(null_repro), breaks = 50, main = "Cross-gene null R_g distribution",
+       xlab = "Null R_g", col = "grey70", border = "white")
+  abline(v = 0, col = "red", lwd = 2)
   abline(v = null_mean, col = "blue", lwd = 2, lty = 2)
   dev.off()
 
-  if (null_mean >= 0.48 && null_mean <= 0.52) {
+  # Cross-gene Spearman null centers near 0 (correlation scale), not 0.5.
+  if (null_mean >= -0.05 && null_mean <= 0.05) {
     append_verdict(validation_dir, "null_centered", 5, "PASS", round(null_mean, 4),
-                   "[0.48, 0.52]", "Null well-formed, centered at 0.5")
+                   "[-0.05, 0.05]", "Cross-gene null well-formed, centered near 0")
   } else {
     append_verdict(validation_dir, "null_centered", 5, "FAIL", round(null_mean, 4),
-                   "[0.48, 0.52]", "Shuffle or score bug; check gene shuffle independence")
+                   "[-0.05, 0.05]", "Null bug; check cross-gene partner sampling")
   }
 
   scheme_a_mean <- null_mean
   n_scheme_b <- 5L
   set.seed(ctx$cfg$seed)
+  agg <- if (!is.null(ctx$repro$aggregate)) ctx$repro$aggregate else "median"
+  min_ov <- if (!is.null(ctx$cfg$min_cci_overlap)) ctx$cfg$min_cci_overlap else 10L
   scheme_b_scores <- replicate(n_scheme_b, {
     Xshuf <- shuffle_cci_within_gene(ctx$Xtilde)
-    repro <- compute_repro(Xshuf, ctx$cohort_pairs_idx)
-    mean(repro$ReproScore, na.rm = TRUE)
+    cm <- compute_pair_cor_matrices(Xshuf, ctx$cohort_pairs_idx, min_overlap = min_ov)
+    mean(compute_Rg_from_cormats(cm, aggregate = agg)$Rg, na.rm = TRUE)
   })
   scheme_b_mean <- mean(scheme_b_scores)
 
@@ -77,7 +80,7 @@ run_v5_nulls <- function(ctx, validation_dir) {
     repro_nulls <- ctx$stage05_env$repro_df
   }
   if (is.null(repro_nulls) || !"shuffle_p" %in% names(repro_nulls)) {
-    obs <- ctx$repro_df$ReproScore
+    obs <- ctx$repro_df$Rg
     names(obs) <- ctx$repro_df$gene
     p_emp <- vapply(seq_len(nrow(null_repro)), function(g) {
       mean(null_repro[g, ] >= obs[g], na.rm = TRUE)
@@ -141,8 +144,8 @@ run_v5_nulls <- function(ctx, validation_dir) {
 
     png(file.path(validation_dir, "results", "global_null_figure.png"),
         width = 700, height = 500)
-    hist(null_dist, breaks = 40, main = "Global permutation null",
-         xlab = "Null statistic (mean ReproScore - 0.5)", col = "grey70", border = "white")
+    hist(null_dist, breaks = 40, main = "Global cross-gene null",
+         xlab = "Null statistic (mean R_g)", col = "grey70", border = "white")
     abline(v = obs, col = "red", lwd = 2)
     legend("topright", legend = c(sprintf("obs=%.4f", obs), sprintf("p=%.4f", emp_p)),
            col = c("red", NA), lty = c(1, NA), bty = "n")

@@ -1,7 +1,7 @@
 # Shared helpers for reproducibility atlas validation QC.
 
 STAR_CHECKS <- c(
-  "eff_n", "batch_collapse", "diag_visible", "reproscore_vs_n", "raw_gap",
+  "eff_n", "batch_collapse", "diag_visible", "Rg_vs_n", "raw_gap",
   "null_centered", "na_exchangeable", "global_test", "loco_stability",
   "fastpath_equiv"
 )
@@ -123,7 +123,12 @@ load_validation_context <- function(output_dir,
 
   if (!is.null(null_checkpoint) && (is.null(null_repro) || ncol(null_repro) < cfg$n_perm)) {
     if (null_checkpoint$completed >= cfg$n_perm) {
-      null_repro <- null_checkpoint$null_repro_scores
+      # New schema stores null_Rg; fall back to the legacy field name.
+      null_repro <- if (!is.null(null_checkpoint$null_Rg)) {
+        null_checkpoint$null_Rg
+      } else {
+        null_checkpoint$null_repro_scores
+      }
     }
   }
 
@@ -251,7 +256,7 @@ gate_b_decision <- function(validation_dir) {
     null_centered = get_status("null_centered"),
     raw_gap = get_status("raw_gap"),
     diag_visible = get_status("diag_visible"),
-    reproscore_vs_n = get_status("reproscore_vs_n"),
+    Rg_vs_n = get_status("Rg_vs_n"),
     global_test = get_status("global_test")
   )
 }

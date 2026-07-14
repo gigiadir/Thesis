@@ -52,14 +52,14 @@ run_v4_reproscore <- function(ctx, validation_dir) {
   if (file.exists(eff_path)) {
     eff_df <- readr::read_tsv(eff_path, show_col_types = FALSE)
     merged <- merge(repro_df, eff_df[, c("gene", "median_eff_n")], by = "gene")
-    rho <- cor(merged$ReproScore, merged$median_eff_n, method = "spearman", use = "complete.obs")
+    rho <- cor(merged$Rg, merged$median_eff_n, method = "spearman", use = "complete.obs")
 
-    png(file.path(validation_dir, "results", "reproscore_vs_effn.png"),
+    png(file.path(validation_dir, "results", "Rg_vs_effn.png"),
         width = 600, height = 500)
-    plot(merged$median_eff_n, merged$ReproScore, pch = 16, cex = 0.6,
-         xlab = "Median effective-n", ylab = "ReproScore",
-         main = sprintf("ReproScore vs effective-n (rho=%.3f)", rho))
-    abline(h = 0.5, col = "grey", lty = 2)
+    plot(merged$median_eff_n, merged$Rg, pch = 16, cex = 0.6,
+         xlab = "Median effective-n", ylab = "R_g",
+         main = sprintf("R_g vs effective-n (rho=%.3f)", rho))
+    abline(h = 0, col = "grey", lty = 2)
     dev.off()
 
     abs_rho <- abs(rho)
@@ -73,7 +73,7 @@ run_v4_reproscore <- function(ctx, validation_dir) {
       status <- "PASS"
       note <- "Score not a sparsity artifact"
     }
-    append_verdict(validation_dir, "reproscore_vs_n", 4, status, round(rho, 4),
+    append_verdict(validation_dir, "Rg_vs_n", 4, status, round(rho, 4),
                    "|rho| < 0.15", note)
   }
 
@@ -94,25 +94,25 @@ run_v4_reproscore <- function(ctx, validation_dir) {
                    "> 0", "No raw same-vs-different gap")
   }
 
-  rs <- repro_df$ReproScore
-  png(file.path(validation_dir, "results", "reproscore_hist.png"),
+  rg <- repro_df$Rg
+  png(file.path(validation_dir, "results", "Rg_hist.png"),
       width = 600, height = 500)
-  hist(rs, breaks = 40, main = "ReproScore distribution", xlab = "ReproScore",
+  hist(rg, breaks = 40, main = "R_g distribution", xlab = "R_g",
        col = "steelblue", border = "white")
-  abline(v = 0.5, col = "red", lty = 2)
+  abline(v = 0, col = "red", lty = 2)
   dev.off()
 
-  frac_near_half <- mean(abs(rs - 0.5) < 0.05, na.rm = TRUE)
-  frac_high <- mean(rs > 0.9, na.rm = TRUE)
+  frac_near_zero <- mean(abs(rg) < 0.05, na.rm = TRUE)
+  frac_high <- mean(rg > 0.5, na.rm = TRUE)
   if (frac_high > 0.8) {
-    append_verdict(validation_dir, "reproscore_dist", 4, "FAIL", round(frac_high, 3),
+    append_verdict(validation_dir, "Rg_dist", 4, "FAIL", round(frac_high, 3),
                    "not all near 1", "Possible leakage / effective-n artifact")
-  } else if (frac_near_half > 0.9) {
-    append_verdict(validation_dir, "reproscore_dist", 4, "INFO", round(frac_near_half, 3),
-                   "bimodal preferred", "No signal; scores cluster at 0.5")
+  } else if (frac_near_zero > 0.9) {
+    append_verdict(validation_dir, "Rg_dist", 4, "INFO", round(frac_near_zero, 3),
+                   "right tail preferred", "No signal; R_g clusters at 0")
   } else {
-    append_verdict(validation_dir, "reproscore_dist", 4, "PASS", round(frac_high, 3),
-                   "bimodal with right tail", "Distribution shows signal structure")
+    append_verdict(validation_dir, "Rg_dist", 4, "PASS", round(frac_high, 3),
+                   "centered near 0 with right tail", "Distribution shows signal structure")
   }
 
   ctx
