@@ -1,0 +1,107 @@
+# Stage 4 — Reproducibility score R_g
+
+
+
+
+``` r
+output_dir <- atlas_env$output_dir
+cohorts <- atlas_env$cohorts
+gene_universe <- atlas_env$gene_universe
+Xtilde <- atlas_env$Xtilde
+
+aggregate <- if (!is.null(cfg$rg_aggregate)) cfg$rg_aggregate else "median"
+min_overlap <- if (!is.null(cfg$min_cci_overlap)) cfg$min_cci_overlap else 10L
+
+message(sprintf("Stage 4: R_g (aggregate = %s, min_cci_overlap = %d)", aggregate, min_overlap))
+```
+
+```
+## Stage 4: R_g (aggregate = median, min_cci_overlap = 10)
+```
+
+``` r
+idx_pairs <- cohort_pairs(length(cohorts))
+pair_labels <- vapply(idx_pairs, function(pr) {
+  paste(cohorts[pr[1]], cohorts[pr[2]], sep = "_vs_")
+}, character(1))
+
+# Full gene x gene Spearman matrices (diagonal = same-gene concordance; the
+# off-diagonal feeds the Stage 5 cross-gene null). Overlap-gated so observed and
+# null share the same min-CCI rule.
+cor_mats <- compute_pair_cor_matrices(Xtilde, idx_pairs, min_overlap = min_overlap)
+names(cor_mats) <- pair_labels
+
+# Primary statistic: R_g = median of a gene's <=6 same-gene pairwise Spearman rho.
+rg <- compute_Rg_from_cormats(cor_mats, aggregate = aggregate)
+colnames(rg$pairwise_rho) <- pair_labels
+
+# Supplementary diagnostic: ReproScore (self vs other genes percentile).
+repro_sup <- compute_reproscore_from_cormats(cor_mats)
+
+repro <- list(
+  Rg = rg$Rg,
+  Rg_mean = rg$Rg_mean,
+  pairwise_rho = rg$pairwise_rho,
+  n_pairs_computable = rg$n_pairs_computable,
+  ReproScore = repro_sup$ReproScore,
+  R_self = repro_sup$R_self,
+  frac_pairs = repro_sup$frac_pairs,
+  U = repro_sup$U,
+  cor_mats = cor_mats,
+  aggregate = aggregate,
+  min_overlap = min_overlap
+)
+
+repro_df <- data.frame(
+  gene = gene_universe,
+  Rg = rg$Rg,
+  Rg_mean = rg$Rg_mean,
+  n_pairs_computable = rg$n_pairs_computable,
+  ReproScore = repro_sup$ReproScore,   # supplementary
+  R_self = repro_sup$R_self,           # supplementary
+  frac_pairs = repro_sup$frac_pairs,   # supplementary
+  stringsAsFactors = FALSE
+)
+
+if (isTRUE(cfg$eb_shrink)) {
+  repro_df$Rg_shrunk <- 0.5 * repro_df$Rg + 0.5 * mean(repro_df$Rg, na.rm = TRUE)
+}
+
+readr::write_tsv(repro_df, file.path(output_dir, "results", "repro_scores.tsv"))
+readr::write_tsv(
+  data.frame(gene = gene_universe, rg$pairwise_rho, check.names = FALSE),
+  file.path(output_dir, "results", "pairwise_rho.tsv")
+)
+saveRDS(repro$cor_mats, file.path(output_dir, "results", "cor_pair_matrices.rds"))
+
+atlas_env$repro <- repro
+atlas_env$repro_df <- repro_df
+atlas_env$cohort_pairs <- idx_pairs
+atlas_env$pair_labels <- pair_labels
+save.atlas.checkpoint(atlas_env, 4)
+```
+
+```
+## Saved stage04_atlas_env.rds
+```
+
+``` r
+head(repro_df)
+```
+
+```
+##        gene           Rg     Rg_mean n_pairs_computable ReproScore      R_self
+## ABI1   ABI1  0.399299436  0.42031869                  6  0.8734015  0.42031869
+## ACTB   ACTB  0.521174537  0.51046281                  6  0.8942882  0.51046281
+## ACTG1 ACTG1  0.265799176  0.27637997                  6  0.7208014  0.27637997
+## AFF4   AFF4  0.003808426  0.05374989                  6  0.5622336  0.05374989
+## AGO2   AGO2 -0.382843601 -0.10531806                  6  0.4151748 -0.10531806
+## AHNAK AHNAK  0.033028107  0.02715100                  6  0.5353794  0.02715100
+##       frac_pairs
+## ABI1   0.3333333
+## ACTB   0.5000000
+## ACTG1  0.1666667
+## AFF4   0.0000000
+## AGO2   0.1666667
+## AHNAK  0.0000000
+```

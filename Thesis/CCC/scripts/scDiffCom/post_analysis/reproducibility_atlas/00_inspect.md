@@ -1,0 +1,147 @@
+# Stage 0 — Inspect and load
+
+
+
+
+``` r
+stage00_path <- file.path(results_dir, "stage00_atlas_env.rds")
+if (file.exists(stage00_path)) {
+  message("Loading existing stage00_atlas_env.rds (delete to re-run from scratch)")
+  atlas_env <- readRDS(stage00_path)
+} else {
+  results_dir_exp <- path.expand(cfg$base_results_dir)
+  output_dir      <- path.expand(cfg$output_dir)
+  dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
+
+  cohorts <- cfg$cohorts
+  message("Stage 0: inspect objects")
+
+  discovered <- discover.gene.universe.from.cohorts(cohorts, results_dir = results_dir_exp)
+  genes_by_cohort <- discovered$genes_by_cohort
+  gene_universe   <- discovered$gene_universe
+  gene_union      <- discovered$gene_union
+  message(sprintf("  gene intersection: %d | union: %d", length(gene_universe), length(gene_union)))
+
+  if (length(gene_universe) == 0) {
+    stop("Gene intersection is empty — check base_results_dir and cohort names.")
+  }
+
+  missing_tbl <- purrr::map_dfr(cohorts, function(ds) {
+    missing <- setdiff(gene_universe, genes_by_cohort[[ds]])
+    data.frame(
+      cohort = ds,
+      n_present = length(genes_by_cohort[[ds]]),
+      n_in_universe = length(gene_universe),
+      n_missing_from_universe = length(missing),
+      missing_genes = paste(missing, collapse = ";"),
+      stringsAsFactors = FALSE
+    )
+  })
+  readr::write_tsv(
+    data.frame(gene = gene_universe, stringsAsFactors = FALSE),
+    file.path(results_dir, "gene_universe.tsv")
+  )
+  readr::write_tsv(missing_tbl, file.path(results_dir, "genes_missing_per_cohort.tsv"))
+
+  sample_cohort <- cohorts[[1]]
+  sample_gene   <- gene_universe[[1]]
+  sample_path   <- file.path(
+    results_dir_exp, sample_cohort,
+    sprintf("%s_%s_scDiffCom.rds", sample_gene, sample_cohort)
+  )
+  sample_obj   <- readRDS(sample_path)
+  sample_df    <- sample_obj@cci_table_detected
+  sample_class <- paste(class(sample_obj), collapse = ", ")
+  sample_slots <- paste(slotNames(sample_obj), collapse = ", ")
+  rm(sample_obj)
+
+  hn_load <- load.and.filter.malignant.by.cohorts(
+    cohorts = cohorts,
+    results_dir = results_dir_exp,
+    genes = gene_universe,
+    filter_unknown_celltypes = isTRUE(cfg$filter_unknown_celltypes),
+    malignant_celltype = cfg$malignant_celltype,
+    checkpoint_dir = file.path(results_dir, "checkpoints"),
+    verbose = TRUE
+  )
+  malignant_by_cohort <- hn_load$malignant_by_cohort
+
+  if (isTRUE(cfg$filter_unknown_celltypes)) {
+    message("Unknown-celltype filter applied:")
+    for (ds in cohorts) {
+      report.filter.malignant(
+        hn_load$malignant_orig_by_cohort[[ds]],
+        hn_load$malignant_by_cohort[[ds]],
+        ds
+      )
+    }
+  }
+
+  inspect_lines <- c(
+    "=== scDiffCom object inspection (Stage 0) ===",
+    paste("timestamp:", Sys.time()),
+    paste("results_dir:", results_dir_exp),
+    paste("cohorts:", paste(cohorts, collapse = ", ")),
+    paste("gene_universe:", length(gene_universe), "genes"),
+    paste("de_filter: IS_CCI_DE == TRUE"),
+    paste("filter_unknown_celltypes:", cfg$filter_unknown_celltypes),
+    "",
+    sprintf("Sample object: %s / %s", sample_cohort, sample_gene),
+    paste("class:", sample_class),
+    paste("slots:", sample_slots),
+    paste("cci_table_detected columns:", paste(names(sample_df), collapse = ", ")),
+    sprintf("cci_table_detected dim: %d rows x %d cols", nrow(sample_df), ncol(sample_df)),
+    "",
+    "IS_CCI_DE (tumor-involved sample rows):",
+    capture.output(print(table(
+      sample_df$IS_CCI_DE[
+        sample_df$EMITTER_CELLTYPE %in% MALIGNANT_CELLTYPE |
+          sample_df$RECEIVER_CELLTYPE %in% MALIGNANT_CELLTYPE
+      ],
+      useNA = "ifany"
+    ))),
+    "",
+    "head(cci_table_detected):",
+    capture.output(print(head(sample_df[, c(
+      "CCI", "EMITTER_CELLTYPE", "RECEIVER_CELLTYPE", "LRI",
+      "LOGFC", "IS_CCI_DE", "BH_P_VALUE_DE", "REGULATION"
+    )], 5))),
+    "",
+    "DE-filtered malignant rows per cohort:"
+  )
+  de_counts <- purrr::imap(malignant_by_cohort, function(lst, ds) {
+    n_rows <- sum(vapply(lst, nrow, integer(1)))
+    sprintf("  %s: %d total DE rows across %d genes", ds, n_rows, length(lst))
+  })
+  inspect_lines <- c(inspect_lines, de_counts, "")
+  writeLines(inspect_lines, file.path(results_dir, "inspect_report.txt"))
+
+  atlas_env <- new.env(parent = globalenv())
+  atlas_env$cfg                 <- cfg
+  atlas_env$results_dir         <- results_dir_exp
+  atlas_env$output_dir          <- output_dir
+  atlas_env$cohorts             <- cohorts
+  atlas_env$gene_universe       <- gene_universe
+  atlas_env$genes_by_cohort     <- genes_by_cohort
+  atlas_env$malignant_by_cohort <- malignant_by_cohort
+
+  save.atlas.checkpoint(atlas_env, 0)
+  file.copy(
+    file.path(ATLAS_DIR, "config.yml"),
+    file.path(results_dir, "config_used.yml"),
+    overwrite = TRUE
+  )
+}
+```
+
+```
+## Loading existing stage00_atlas_env.rds (delete to re-run from scratch)
+```
+
+``` r
+length(atlas_env$gene_universe)
+```
+
+```
+## [1] 392
+```

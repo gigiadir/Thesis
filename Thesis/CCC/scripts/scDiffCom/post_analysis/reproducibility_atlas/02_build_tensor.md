@@ -1,0 +1,88 @@
+# Stage 2 — Full tensor X_full [G × |J_c|] per cohort
+
+
+
+
+``` r
+output_dir <- atlas_env$output_dir
+cohorts <- atlas_env$cohorts
+gene_universe <- atlas_env$gene_universe
+malignant_by_cohort <- atlas_env$malignant_by_cohort
+J <- atlas_env$J
+cci_by_cohort <- atlas_env$cci_by_cohort
+na_mask <- atlas_env$na_mask
+
+message("Stage 2: build full logFC tensor X_full (native CCI columns per cohort)")
+```
+
+```
+## Stage 2: build full logFC tensor X_full (native CCI columns per cohort)
+```
+
+``` r
+# Full tensor: each cohort keeps ALL its DE CCIs as columns. This is the
+# centering superset — Stage 3 subtracts the cohort mean-gene profile over these
+# native columns, then restricts to the intersection J for scoring.
+X_full <- lapply(cohorts, function(ds) {
+  gene_list <- malignant_by_cohort[[ds]]
+  Jc <- cci_by_cohort[[ds]]
+  mat <- vapply(
+    gene_universe,
+    function(g) gene_logfc_vector(gene_list[[g]], Jc),
+    numeric(length(Jc))
+  )
+  mat <- t(mat)
+  rownames(mat) <- gene_universe
+  colnames(mat) <- Jc
+  mat
+})
+names(X_full) <- cohorts
+
+# Every column of J must be present in every cohort's full tensor (J ⊆ J_c).
+for (ds in cohorts) {
+  stopifnot(all(J %in% colnames(X_full[[ds]])))
+  stopifnot(identical(rownames(X_full[[ds]]), gene_universe))
+}
+
+na_frac_full <- vapply(X_full, function(m) mean(is.na(m)), numeric(1))
+na_frac_J <- vapply(X_full, function(m) mean(is.na(m[, J, drop = FALSE])), numeric(1))
+readr::write_tsv(
+  data.frame(
+    cohort = cohorts,
+    n_genes = vapply(X_full, nrow, integer(1)),
+    n_ccis_full = vapply(X_full, ncol, integer(1)),
+    n_ccis_J = length(J),
+    na_fraction_full = na_frac_full,
+    na_fraction_J = na_frac_J
+  ),
+  file.path(output_dir, "results", "tensor_na_fraction.tsv")
+)
+
+# J-aligned raw tensor (intersection columns) — kept for QC / provenance and as
+# the "before centering" reference used by Stage 2/3 validation.
+X <- lapply(cohorts, function(ds) X_full[[ds]][, J, drop = FALSE])
+names(X) <- cohorts
+assert_tensor_alignment(X, gene_universe, J, cohorts)
+
+saveRDS(X_full, file.path(output_dir, "results", "X_full.rds"))
+saveRDS(X, file.path(output_dir, "results", "X.rds"))
+saveRDS(na_mask, file.path(output_dir, "results", "na_mask.rds"))
+
+atlas_env$X_full <- X_full
+atlas_env$X <- X
+save.atlas.checkpoint(atlas_env, 2)
+```
+
+```
+## Saved stage02_atlas_env.rds
+```
+
+``` r
+vapply(X_full, dim, integer(2))
+```
+
+```
+##      Kurten_HNSC Puram_HNSC Choi_HNSC Bill_HNSC
+## [1,]         392        392       392       392
+## [2,]        3467       8352      9376      6149
+```

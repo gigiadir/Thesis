@@ -1,0 +1,110 @@
+# Stage 1 — CCI vocabulary
+
+Review `results/vocab_report.tsv` before continuing.
+
+
+
+
+``` r
+output_dir <- atlas_env$output_dir
+cohorts <- atlas_env$cohorts
+malignant_by_cohort <- atlas_env$malignant_by_cohort
+
+message("Stage 1: build CCI vocabulary (dual-tier)")
+```
+
+```
+## Stage 1: build CCI vocabulary (dual-tier)
+```
+
+``` r
+# Two-tier vocabulary (advisor methodology):
+#   * cci_by_cohort[[c]] = every DE CCI tested in cohort c -> CENTERING superset
+#                          (Stage 3 subtracts the cohort mean-gene profile over
+#                           this full set, so centering is unbiased).
+#   * J = intersection    -> ANALYSIS subset used for R_g correlation / scoring.
+cci_by_cohort <- cci_union_per_cohort(malignant_by_cohort)
+
+for (ds in cohorts) {
+  message(sprintf("  %s: %d unique DE CCIs (centering superset)", ds, length(cci_by_cohort[[ds]])))
+}
+```
+
+```
+##   Kurten_HNSC: 3467 unique DE CCIs (centering superset)
+```
+
+```
+##   Puram_HNSC: 8352 unique DE CCIs (centering superset)
+```
+
+```
+##   Choi_HNSC: 9376 unique DE CCIs (centering superset)
+```
+
+```
+##   Bill_HNSC: 6149 unique DE CCIs (centering superset)
+```
+
+``` r
+J_intersection <- Reduce(intersect, cci_by_cohort)
+J_union        <- sort(unique(unlist(cci_by_cohort)))
+vocab_mode     <- cfg$vocab_mode
+
+if (!vocab_mode %in% c("intersection", "union")) {
+  stop("vocab_mode must be 'intersection' or 'union'")
+}
+
+J <- if (vocab_mode == "intersection") J_intersection else J_union
+if (length(J) == 0) stop("CCI vocabulary J is empty")
+
+na_mask <- lapply(cci_by_cohort, function(cci_set) !J %in% cci_set)
+names(na_mask) <- cohorts
+support_loss <- 1 - length(J_intersection) / length(J_union)
+
+vocab_report <- data.frame(
+  metric = c("J_intersection", "J_union", "J_selected", "vocab_mode", "support_loss_fraction", "n_cohorts"),
+  value = c(length(J_intersection), length(J_union), length(J), vocab_mode, support_loss, length(cohorts)),
+  stringsAsFactors = FALSE
+)
+per_cohort <- purrr::imap_dfr(cci_by_cohort, function(cci_set, ds) {
+  data.frame(
+    cohort = ds, n_de_ccis = length(cci_set),
+    n_in_J = sum(J %in% cci_set), n_missing_from_J = sum(!J %in% cci_set),
+    stringsAsFactors = FALSE
+  )
+})
+
+readr::write_tsv(vocab_report, file.path(output_dir, "results", "vocab_report.tsv"))
+readr::write_tsv(per_cohort, file.path(output_dir, "results", "vocab_per_cohort.tsv"))
+saveRDS(J, file.path(output_dir, "results", "J.rds"))
+saveRDS(na_mask, file.path(output_dir, "results", "vocab_na_mask.rds"))
+
+atlas_env$J <- J
+atlas_env$J_union <- J_union
+atlas_env$na_mask <- na_mask
+atlas_env$cci_by_cohort <- cci_by_cohort
+save.atlas.checkpoint(atlas_env, 1)
+```
+
+```
+## Saved stage01_atlas_env.rds
+```
+
+``` r
+message(sprintf("  Analysis vocabulary J = %d CCIs (%s); centering supersets = %s per cohort",
+                length(J), vocab_mode,
+                paste(vapply(cci_by_cohort, length, integer(1)), collapse = "/")))
+```
+
+```
+##   Analysis vocabulary J = 2401 CCIs (intersection); centering supersets = 3467/8352/9376/6149 per cohort
+```
+
+``` r
+length(J)
+```
+
+```
+## [1] 2401
+```

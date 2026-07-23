@@ -1,0 +1,53 @@
+# Stage 6 — Atlas assembly
+
+
+
+
+``` r
+output_dir <- atlas_env$output_dir
+
+message("Stage 6: assemble atlas")
+```
+
+```
+## Stage 6: assemble atlas
+```
+
+``` r
+fdr_threshold <- cfg$fdr_threshold
+min_pairs <- if (!is.null(cfg$atlas_min_pairs)) cfg$atlas_min_pairs else 1L
+
+# Membership from EVT-calibrated FDR on R_g (advisor primary statistic), with an
+# optional coverage floor on the number of computable cohort pairs.
+atlas <- atlas_env$repro_df %>%
+  mutate(
+    atlas_member = evt_FDR < fdr_threshold & n_pairs_computable >= min_pairs,
+    strength_tier = case_when(
+      !atlas_member ~ "not_member",
+      Rg >= 0.5 ~ "strong",
+      Rg >= 0.3 ~ "moderate",
+      TRUE ~ "weak"
+    )
+  ) %>%
+  arrange(desc(Rg))
+
+readr::write_csv(atlas, file.path(output_dir, "results", "atlas.csv"))
+if (requireNamespace("arrow", quietly = TRUE)) {
+  arrow::write_parquet(atlas, file.path(output_dir, "results", "atlas.parquet"))
+}
+
+atlas_env$atlas <- atlas
+save.atlas.checkpoint(atlas_env, 6)
+```
+
+```
+## Saved stage06_atlas_env.rds
+```
+
+``` r
+sum(atlas$atlas_member, na.rm = TRUE)
+```
+
+```
+## [1] 41
+```

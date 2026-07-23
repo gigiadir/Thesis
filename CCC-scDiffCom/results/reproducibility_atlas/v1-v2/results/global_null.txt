@@ -1,0 +1,13 @@
+=== Global cross-gene null (mean R_g) ===
+timestamp: 2026-07-14 16:05:03.69888
+n_perm: 1000
+n_cores: 64
+aggregate: median
+obs_statistic_mean_Rg: 0.195170257801452
+null_mean: -0.000175790771557682
+null_sd: 0.00880944997292335
+empirical_p_one_sided: 0.000999000999000999
+evt_p: 2.2250738585072e-308
+evt_method: gpd
+evt_gof_p: 0.39
+atlas_provenance_note: All 4 cohorts are HNSCC Atlas project subsets
